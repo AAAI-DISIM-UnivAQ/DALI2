@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DALI2 - Multi-Agent System</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>DALI<span class="accent">2</span></h1>
+            <span class="subtitle">Multi-Agent System</span>
+        </div>
+        <div class="header-right">
+            <span id="status-indicator" class="status-dot"></span>
+            <span id="status-text">Connecting...</span>
+            <button id="btn-reload" class="btn btn-secondary" title="Reload agents">&#x21bb; Reload</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left panel: Agents -->
+        <aside id="agents-panel">
+            <h2>Agents</h2>
+            <div id="agents-list"></div>
+        </aside>
+
+        <!-- Center: Logs -->
+        <section id="logs-panel">
+            <div class="panel-header">
+                <h2>Event Log</h2>
+                <div class="log-controls">
+                    <select id="log-filter">
+                        <option value="">All agents</option>
+                    </select>
+                    <button id="btn-clear-logs" class="btn btn-small">Clear</button>
+                    <label class="toggle">
+                        <input type="checkbox" id="auto-scroll" checked>
+                        <span>Auto-scroll</span>
+                    </label>
+                </div>
+            </div>
+            <div id="log-container"></div>
+        </section>
+
+        <!-- Right panel: Actions + Info -->
+        <aside id="info-panel">
+            <!-- Send Message -->
+            <div class="card">
+                <h3>Send Event</h3>
+                <div class="form-group">
+                    <label for="send-to">To Agent</label>
+                    <select id="send-to"></select>
+                </div>
+                <div class="form-group">
+                    <label for="send-content">Event Content</label>
+                    <input type="text" id="send-content" placeholder="event(arg1, arg2)" spellcheck="false">
+                </div>
+                <button id="btn-send" class="btn btn-primary">Send</button>
+            </div>
+
+            <!-- Agent Details -->
+            <div class="card" id="agent-details" style="display:none">
+                <h3>Agent: <span id="detail-name"></span></h3>
+                <div class="detail-row">
+                    <span class="label">Status</span>
+                    <span id="detail-status" class="badge"></span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Cycle</span>
+                    <span id="detail-cycle"></span>
+                </div>
+                <div class="detail-section">
+                    <h4>Beliefs</h4>
+                    <ul id="detail-beliefs" class="mono-list"></ul>
+                </div>
+                <div class="detail-section">
+                    <h4>Past Events <span class="count" id="past-count"></span></h4>
+                    <ul id="detail-past" class="mono-list"></ul>
+                </div>
+                <div class="detail-actions">
+                    <button class="btn btn-small btn-start">Start</button>
+                    <button class="btn btn-small btn-stop">Stop</button>
+                </div>
+            </div>
+
+            <!-- Blackboard -->
+            <div class="card">
+                <h3>Blackboard</h3>
+                <ul id="blackboard-list" class="mono-list"></ul>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Source Editor Modal -->
+    <div id="editor-modal" class="modal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Agent Source Editor</h2>
+                <button id="btn-close-editor" class="btn btn-small">&times;</button>
+            </div>
+            <textarea id="source-editor" spellcheck="false"></textarea>
+            <div class="modal-footer">
+                <button id="btn-save-source" class="btn btn-primary">Save &amp; Reload</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

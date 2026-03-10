@@ -1,0 +1,9 @@
+services:
+  dali2:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./examples:/dali2/examples
+    command: ["8080", "examples/agriculture.pl"]
+    restart: unless-stopped
