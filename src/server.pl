@@ -4,6 +4,10 @@
 
 :- module(server, [main/0]).
 
+%% Suppress SWI-Prolog informational messages (% Started server, % Library moved, etc.)
+:- multifile user:message_hook/3.
+user:message_hook(_, informational, _) :- !.
+
 :- use_module(library(http/thread_httpd)).
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_json)).
@@ -80,9 +84,8 @@ main :-
         format("No agent file specified. Use the web UI to load agents.~n"),
         assert(current_agent_file(''))
     ),
-    format("Server listening on port ~w~n", [Port]),
-    format("(If using Docker with port mapping, open the mapped host port in your browser)~n~n"),
     http_server(http_dispatch, [port(Port)]),
+    format("Server started.~n~n"),
     %% Handle SIGINT/SIGTERM for clean shutdown (e.g. CTRL+C in Docker)
     on_signal(int, _, signal_stop),
     on_signal(term, _, signal_stop),
