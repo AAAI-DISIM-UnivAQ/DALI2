@@ -1,0 +1,34 @@
+# DALI2 Distributed Example - Two-node emergency response
+# Node 1 (sensors): sensor + logger on port 8081
+# Node 2 (responders): coordinator + evacuator + responder + communicator on port 8082
+#
+# Usage: docker compose -f docker-compose.distributed.yml up --build
+# Then send: curl -X POST http://localhost:8081/api/send -H "Content-Type: application/json" \
+#   -d '{"to":"sensor","content":"detect(fire, rome)"}'
+
+services:
+  sensors:
+    build: .
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./examples:/dali2/examples
+    environment:
+      - DALI2_NODE=sensors
+      - DALI2_PEERS=responders@http://responders:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    command: ["8080", "examples/emergency_sensors.pl", "--name", "sensors"]
+    restart: unless-stopped
+
+  responders:
+    build: .
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./examples:/dali2/examples
+    environment:
+      - DALI2_NODE=responders
+      - DALI2_PEERS=sensors@http://sensors:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    command: ["8080", "examples/emergency_responders.pl", "--name", "responders"]
+    restart: unless-stopped

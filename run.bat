@@ -17,7 +17,25 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM --- Agent file selection ---
+echo Modes:
+echo   1. Single instance (all agents on one node)
+echo   2. Distributed (multi-node federation)
+echo.
+set /p "MODE=Choose mode [1]: "
+if "!MODE!"=="" set "MODE=1"
+
+if "!MODE!"=="2" (
+    echo.
+    echo Starting distributed mode (2 nodes^)...
+    echo   Node 1 (sensors^): http://localhost:8081
+    echo   Node 2 (responders^): http://localhost:8082
+    echo.
+    docker compose -f docker-compose.distributed.yml up --build
+    goto :end
+)
+
+REM --- Single instance mode ---
+echo.
 echo Available example agent files:
 echo.
 for %%f in (examples\*.pl) do (
@@ -50,10 +68,11 @@ echo.
 
 REM --- Build and start ---
 echo Building and starting DALI2...
-echo Web UI will be available at: http://localhost:8080
+echo Web UI: http://localhost:8080
 echo Press Ctrl+C to stop.
 echo.
 
 docker compose up --build
 
+:end
 endlocal

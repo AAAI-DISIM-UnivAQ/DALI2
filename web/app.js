@@ -66,6 +66,16 @@ const postAiAsk = (context) => api('/api/ai/ask', {
     method: 'POST', body: JSON.stringify({ context })
 });
 
+// Federation API
+const getPeers = () => api('/api/peers');
+const postPeerRegister = (name, url) => api('/api/peers/register', {
+    method: 'POST', body: JSON.stringify({ name, url })
+});
+const postPeerUnregister = (name) => api('/api/peers/unregister', {
+    method: 'POST', body: JSON.stringify({ name })
+});
+const postPeerSync = () => api('/api/peers/sync', { method: 'POST' });
+
 // ============================================================
 // UI Updates
 // ============================================================
@@ -78,9 +88,12 @@ function formatTime(timestamp) {
 function updateStatus(data) {
     const dot = document.getElementById('status-indicator');
     const text = document.getElementById('status-text');
+    const nodeLabel = document.getElementById('node-name');
     if (data) {
         dot.className = 'status-dot connected';
-        text.textContent = `${data.agents} agent${data.agents !== 1 ? 's' : ''} active`;
+        const peerInfo = data.peers > 0 ? ` | ${data.peers} peer${data.peers !== 1 ? 's' : ''}` : '';
+        text.textContent = `${data.agents} agent${data.agents !== 1 ? 's' : ''} active${peerInfo}`;
+        if (data.node) nodeLabel.textContent = data.node;
     } else {
         dot.className = 'status-dot error';
         text.textContent = 'Disconnected';
@@ -346,6 +359,19 @@ function init() {
         poll();
     });
 
+    // --- Federation / Peers ---
+    document.getElementById('btn-add-peer').addEventListener('click', async () => {
+        const name = document.getElementById('peer-name').value.trim();
+        const url = document.getElementById('peer-url').value.trim();
+        if (!name || !url) return;
+        const res = await postPeerRegister(name, url);
+        if (res && res.ok) {
+            document.getElementById('peer-name').value = '';
+            document.getElementById('peer-url').value = '';
+            updatePeers();
+        }
+    });
+
     // --- AI Oracle ---
     document.getElementById('btn-set-key').addEventListener('click', async () => {
         const key = document.getElementById('ai-key-input').value.trim();
@@ -404,6 +430,10 @@ function init() {
     // AI status
     updateAiStatus();
     setInterval(updateAiStatus, 10000);
+
+    // Federation peers
+    updatePeers();
+    setInterval(updatePeers, 5000);
 }
 
 async function updateAiStatus() {
@@ -424,6 +454,51 @@ async function updateAiStatus() {
                 if (opt.value === data.model) { sel.value = data.model; break; }
             }
         }
+    }
+}
+
+async function updatePeers() {
+    const data = await getPeers();
+    const list = document.getElementById('peers-list');
+    const countEl = document.getElementById('peer-count');
+    const remoteSection = document.getElementById('remote-agents-section');
+    const remoteList = document.getElementById('remote-agents-list');
+    list.innerHTML = '';
+    if (!data || !data.peers) return;
+    countEl.textContent = `(${data.peers.length})`;
+    data.peers.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'peer-item';
+        const agentCount = p.agents ? p.agents.length : 0;
+        div.innerHTML = `
+            <span class="peer-dot"></span>
+            <span class="peer-name">${p.name}</span>
+            <span class="peer-agents">${agentCount} agents</span>
+            <button class="btn-peer-remove" title="Disconnect">&times;</button>
+        `;
+        div.querySelector('.btn-peer-remove').onclick = async () => {
+            await postPeerUnregister(p.name);
+            updatePeers();
+        };
+        list.appendChild(div);
+    });
+    // Show remote agents
+    const allRemote = data.peers.flatMap(p => (p.agents || []).map(a => ({name: a, peer: p.name})));
+    if (allRemote.length > 0) {
+        remoteSection.style.display = 'block';
+        remoteList.innerHTML = '';
+        allRemote.forEach(ra => {
+            const item = document.createElement('div');
+            item.className = 'agent-item remote';
+            item.innerHTML = `
+                <span class="agent-dot remote"></span>
+                <span class="agent-name">${ra.name}</span>
+                <span class="agent-cycle">@${ra.peer}</span>
+            `;
+            remoteList.appendChild(item);
+        });
+    } else {
+        remoteSection.style.display = 'none';
     }
 }
 

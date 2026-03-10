@@ -21,18 +21,38 @@ DALI2 is a complete rewrite of the [DALI](https://github.com/AAAI-DISIM-UnivAQ/D
 # Default (agriculture example, no AI)
 docker compose up --build
 
-# Choose agent file
+# Choose agent file (Linux/macOS)
 AGENT_FILE=examples/emergency.pl docker compose up --build
 
-# With OpenAI API key for AI Oracle
-OPENAI_API_KEY=sk-your-key AGENT_FILE=examples/agriculture.pl docker compose up --build
+# PowerShell
+$env:AGENT_FILE="examples/emergency.pl"; docker compose up --build
+
+# With OpenAI API key (Linux/macOS)
+OPENAI_API_KEY=sk-your-key docker compose up --build
+
+# PowerShell
+$env:OPENAI_API_KEY="sk-your-key"; docker compose up --build
 ```
 
 Open [http://localhost:8080](http://localhost:8080) in your browser.
 
+### Distributed Mode (multiple machines)
+
+Run agents across separate containers that communicate via HTTP federation:
+
+```sh
+docker compose -f docker-compose.distributed.yml up --build
+```
+
+This starts two nodes:
+- **sensors** (`http://localhost:8081`) — sensor + logger agents
+- **responders** (`http://localhost:8082`) — coordinator + evacuator + responder + communicator
+
+Agents automatically discover each other and route messages across nodes.
+
 ### Windows
 
-Run `run.bat` — it will interactively ask for agent file and API key:
+Run `run.bat` — choose single or distributed mode interactively:
 
 ```sh
 run.bat
@@ -43,7 +63,11 @@ run.bat
 Requires [SWI-Prolog](https://www.swi-prolog.org/) installed locally.
 
 ```sh
+# Single instance
 swipl -l src/server.pl -g main -t halt -- 8080 examples/agriculture.pl
+
+# Named node with agent filter
+swipl -l src/server.pl -g main -t halt -- 8080 examples/emergency_sensors.pl --name sensors
 ```
 
 ## Agent Language
@@ -127,12 +151,14 @@ my_agent:on(analyze(Data)) :-
 
 The web interface at `http://localhost:8080` provides:
 
-- **Agent list** — shows all agents with running/stopped status
+- **Agent list** — shows local and remote agents with running/stopped status
 - **Event log** — real-time log with filtering by agent
 - **Send events** — inject events into any agent from the browser
 - **Agent details** — beliefs, past events, start/stop controls
 - **Blackboard viewer** — current shared blackboard state
 - **Source editor** — edit and hot-reload agent definitions (double-click the DALI2 logo)
+- **Federation panel** — connect peers, view remote agents across nodes
+- **AI Oracle panel** — configure API key, model, and test AI queries
 
 ## REST API
 
@@ -155,6 +181,12 @@ The web interface at `http://localhost:8080` provides:
 | POST | `/api/ai/key` | Set OpenAI API key `{"key":"sk-..."}` |
 | POST | `/api/ai/model` | Set AI model `{"model":"gpt-4o"}` |
 | POST | `/api/ai/ask` | Query AI `{"context":"..."}` |
+| GET | `/api/peers` | List federation peers |
+| POST | `/api/peers/register` | Connect a peer `{"name":"n","url":"http://..."}` |
+| POST | `/api/peers/unregister` | Disconnect a peer `{"name":"n"}` |
+| POST | `/api/peers/sync` | Sync agent lists with all peers |
+| GET | `/api/remote/agents` | List local agents (for peer queries) |
+| POST | `/api/remote/receive` | Receive message from remote peer |
 
 ## Project Structure
 
@@ -162,7 +194,8 @@ The web interface at `http://localhost:8080` provides:
 DALI2/
 ├── src/
 │   ├── blackboard.pl      # Shared in-memory blackboard
-│   ├── communication.pl   # Message passing between agents
+│   ├── communication.pl   # Message passing (local + remote)
+│   ├── federation.pl      # Distributed peer federation
 │   ├── loader.pl          # Agent file parser
 │   ├── engine.pl          # Core metainterpreter
 │   ├── ai_oracle.pl       # OpenAI/ChatGPT integration
@@ -172,10 +205,13 @@ DALI2/
 │   ├── app.js             # Frontend logic
 │   └── style.css          # Styling
 ├── examples/
-│   ├── agriculture.pl     # Smart agriculture MAS
-│   └── emergency.pl       # Emergency response MAS
+│   ├── agriculture.pl           # Smart agriculture (single node)
+│   ├── emergency.pl             # Emergency response (single node)
+│   ├── emergency_sensors.pl     # Distributed: sensor node
+│   └── emergency_responders.pl  # Distributed: responder node
 ├── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml               # Single instance
+├── docker-compose.distributed.yml   # Multi-instance federation
 ├── run.bat
 └── README.md
 ```
@@ -184,10 +220,10 @@ DALI2/
 
 | Aspect | DALI | DALI2 |
 |--------|------|-------|
-| Source files | ~20 | 6 |
+| Source files | ~20 | 7 |
 | Agent definition | Multiple files (instances.json + type files) | Single .pl file |
-| Process model | Separate process per agent + Linda server | Single process, multi-threaded |
-| Communication | TCP sockets (Linda) | In-memory blackboard |
+| Process model | Separate process per agent + Linda server | Multi-threaded (single or multi-node) |
+| Communication | TCP sockets (Linda) | In-memory blackboard + HTTP federation |
 | Tokenizer | Complex (tokefun + togli_var + metti_var) | None (direct term_expansion) |
 | UI | Separate Python project (dalia) | Integrated web UI |
 | AI integration | External Python TCP service | Built-in (direct OpenAI API calls) |

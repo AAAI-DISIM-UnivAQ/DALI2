@@ -13,6 +13,7 @@
         <div class="header-left">
             <h1>DALI<span class="accent">2</span></h1>
             <span class="subtitle">Multi-Agent System</span>
+            <span id="node-name" class="node-label"></span>
         </div>
         <div class="header-right">
             <span id="status-indicator" class="status-dot"></span>
@@ -22,10 +23,23 @@
     </header>
 
     <main>
-        <!-- Left panel: Agents -->
+        <!-- Left panel: Agents + Peers -->
         <aside id="agents-panel">
-            <h2>Agents</h2>
+            <h2>Local Agents</h2>
             <div id="agents-list"></div>
+            <div id="remote-agents-section" style="display:none">
+                <h2>Remote Agents</h2>
+                <div id="remote-agents-list"></div>
+            </div>
+            <div class="peers-section">
+                <h2>Federation <span class="count" id="peer-count">(0)</span></h2>
+                <div id="peers-list"></div>
+                <div class="peer-add">
+                    <input type="text" id="peer-name" placeholder="node name" spellcheck="false">
+                    <input type="text" id="peer-url" placeholder="http://host:port" spellcheck="false">
+                    <button id="btn-add-peer" class="btn btn-small">Connect</button>
+                </div>
+            </div>
         </aside>
 
         <!-- Center: Logs -->

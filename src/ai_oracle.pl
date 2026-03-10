@@ -79,73 +79,60 @@ ask_ai(Context, SystemPrompt, PrologFact) :-
 %% IMPLEMENTATION
 %% ============================================================
 
+to_string(Term, Str) :-
+    (string(Term) -> Str = Term ;
+     atom(Term) -> atom_string(Term, Str) ;
+     term_to_atom(Term, A), atom_string(A, Str)).
+
 ask_ai_impl(Context, SystemPrompt, PrologFact) :-
     ai_api_key(ApiKey),
     ai_model(Model),
-    %% Build the context string
-    (atom(Context) -> atom_string(Context, ContextStr) ;
-     string(Context) -> ContextStr = Context ;
-     term_to_atom(Context, ContextAtom), atom_string(ContextAtom, ContextStr)),
-    (atom(SystemPrompt) -> atom_string(SystemPrompt, SysStr) ;
-     string(SystemPrompt) -> SysStr = SystemPrompt ;
-     SysStr = SystemPrompt),
-    %% Build JSON request body
-    atom_string(Model, ModelStr),
-    RequestBody = json([
-        model = ModelStr,
-        messages = [
-            json([role = "system", content = SysStr]),
-            json([role = "user", content = ContextStr])
+    to_string(Context, ContextStr),
+    to_string(SystemPrompt, SysStr),
+    to_string(Model, ModelStr),
+    %% Build JSON body as SWI dict
+    Body = _{
+        model: ModelStr,
+        messages: [
+            _{role: "system", content: SysStr},
+            _{role: "user", content: ContextStr}
         ],
-        max_tokens = 100,
-        temperature = 0.3
-    ]),
+        max_tokens: 100,
+        temperature: 0.3
+    },
+    %% Serialize to JSON string
+    with_output_to(string(JsonStr), json_write_dict(current_output, Body, [])),
     %% Make HTTP request to OpenAI
-    atom_concat('Bearer ', ApiKey, AuthHeader),
-    http_open(
-        'https://api.openai.com/v1/chat/completions',
-        ResponseStream,
-        [
-            method(post),
-            request_header('Authorization' = AuthHeader),
-            request_header('Content-Type' = 'application/json'),
-            post(json(RequestBody)),
-            status_code(StatusCode)
-        ]
-    ),
-    %% Read response
-    read_string(ResponseStream, _, ResponseStr),
-    close(ResponseStream),
-    %% Parse JSON response
-    (StatusCode =:= 200 ->
-        atom_string(ResponseAtom, ResponseStr),
-        atom_to_term(ResponseAtom, ResponseJson, _),
-        extract_content(ResponseJson, ContentStr),
-        parse_prolog_fact(ContentStr, PrologFact)
-    ;
-        format(user_error, "[AI Oracle] API returned status ~w~n", [StatusCode]),
-        PrologFact = error(api_status(StatusCode))
+    atom_concat('Bearer ', ApiKey, AuthValue),
+    setup_call_cleanup(
+        http_open(
+            'https://api.openai.com/v1/chat/completions',
+            ResponseStream,
+            [
+                method(post),
+                request_header('Authorization' = AuthValue),
+                post(string('application/json', JsonStr)),
+                status_code(StatusCode)
+            ]
+        ),
+        (   StatusCode =:= 200 ->
+            json_read_dict(ResponseStream, ResponseDict),
+            extract_content(ResponseDict, ContentText),
+            parse_prolog_fact(ContentText, PrologFact)
+        ;
+            read_string(ResponseStream, _, ErrorBody),
+            format(user_error, "[AI Oracle] API returned status ~w: ~w~n", [StatusCode, ErrorBody]),
+            PrologFact = error(api_status(StatusCode))
+        ),
+        close(ResponseStream)
     ).
 
-%% Extract content from OpenAI JSON response
-extract_content(ResponseStr, Content) :-
-    term_string(Json, ResponseStr),
-    (is_dict(Json) ->
-        get_dict(choices, Json, Choices),
-        Choices = [FirstChoice|_],
-        get_dict(message, FirstChoice, Message),
-        get_dict(content, Message, Content)
-    ;
-        %% Fallback: try to parse with json library
-        atom_string(ResponseStr, RStr),
-        open_string(RStr, Stream),
-        json_read_dict(Stream, Dict),
-        close(Stream),
-        get_dict(choices, Dict, Choices2),
-        Choices2 = [FC2|_],
-        get_dict(message, FC2, Msg2),
-        get_dict(content, Msg2, Content)
-    ).
+%% Extract content string from OpenAI JSON response dict
+extract_content(Dict, Content) :-
+    get_dict(choices, Dict, Choices),
+    Choices = [First|_],
+    get_dict(message, First, Msg),
+    get_dict(content, Msg, Content).
 
 %% Parse the AI response string into a Prolog fact
 parse_prolog_fact(ContentStr, PrologFact) :-

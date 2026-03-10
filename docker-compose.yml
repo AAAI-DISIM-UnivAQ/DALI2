@@ -1,3 +1,4 @@
+# Single-instance mode (default). For distributed mode, use docker-compose.distributed.yml
 services:
   dali2:
     build: .
@@ -7,5 +8,6 @@ services:
       - ./examples:/dali2/examples
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DALI2_NODE=${DALI2_NODE:-standalone}
     command: ["8080", "${AGENT_FILE:-examples/agriculture.pl}"]
     restart: unless-stopped

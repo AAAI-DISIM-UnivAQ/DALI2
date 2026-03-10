@@ -21,6 +21,7 @@
 :- use_module(loader).
 :- use_module(engine).
 :- use_module(ai_oracle).
+:- use_module(federation).
 
 %% HTTP Routes
 :- http_handler(root(.),         serve_index,       []).
@@ -41,6 +42,13 @@
 :- http_handler(root(api/ai/key),    api_ai_key,    [method(post)]).
 :- http_handler(root(api/ai/ask),    api_ai_ask,    [method(post)]).
 :- http_handler(root(api/ai/model),  api_ai_model,  [method(post)]).
+%% Federation / Distributed
+:- http_handler(root(api/peers),          api_peers,          []).
+:- http_handler(root(api/peers/register),  api_peer_register, [method(post)]).
+:- http_handler(root(api/peers/unregister),api_peer_unregister,[method(post)]).
+:- http_handler(root(api/peers/sync),      api_peer_sync,     [method(post)]).
+:- http_handler(root(api/remote/agents),   api_remote_agents,  []).
+:- http_handler(root(api/remote/receive),  api_remote_receive, [method(post)]).
 :- http_handler(root(static),  serve_static, [prefix]).
 
 %% ============================================================
@@ -50,35 +58,100 @@
 main :-
     set_prolog_flag(color_term, false),
     current_prolog_flag(argv, Argv),
-    parse_args(Argv, Port, AgentFile),
+    parse_args(Argv, Port, AgentFile, NodeName, AgentFilter),
     format("~n=== DALI2 Multi-Agent System ===~n"),
-    format("Starting on port ~w~n", [Port]),
+    format("Node: ~w | Port: ~w~n", [NodeName, Port]),
     bb_init,
+    federation:fed_init(NodeName),
     (AgentFile \= '' ->
         format("Loading agents from: ~w~n", [AgentFile]),
         loader:load_agents(AgentFile),
-        findall(N, loader:agent_def(N, _), Names),
-        format("Agents defined: ~w~n", [Names]),
+        findall(N, loader:agent_def(N, _), AllNames),
+        format("Agents defined: ~w~n", [AllNames]),
         assert(current_agent_file(AgentFile)),
-        engine:start_all
+        %% Start only filtered agents, or all if no filter
+        (AgentFilter \= [] ->
+            format("Starting agents: ~w~n", [AgentFilter]),
+            forall(member(A, AgentFilter), engine:start_agent(A))
+        ;
+            engine:start_all
+        )
     ;
         format("No agent file specified. Use the web UI to load agents.~n"),
         assert(current_agent_file(''))
     ),
     format("Web UI: http://localhost:~w~n~n", [Port]),
     http_server(http_dispatch, [port(Port)]),
+    %% Set own URL (for peer registration handshakes)
+    format(atom(SelfUrl), "http://localhost:~w", [Port]),
+    federation:fed_set_url(SelfUrl),
+    %% Auto-connect to peers from DALI2_PEERS env var (comma-separated name@url)
+    auto_connect_peers,
     thread_get_message(stop_server).
 
 :- dynamic current_agent_file/1.
 
-%% parse_args(+Argv, -Port, -AgentFile)
-parse_args(Argv, Port, AgentFile) :-
+%% parse_args(+Argv, -Port, -AgentFile, -NodeName, -AgentFilter)
+parse_args(Argv, Port, AgentFile, NodeName, AgentFilter) :-
     (nth0(0, Argv, PortAtom) ->
         atom_number(PortAtom, Port)
     ; Port = 8080),
     (nth0(1, Argv, AgentFile0) ->
         AgentFile = AgentFile0
-    ; AgentFile = '').
+    ; AgentFile = ''),
+    %% --name NodeName
+    (parse_flag(Argv, '--name', NameAtom) ->
+        NodeName = NameAtom
+    ; (getenv('DALI2_NODE', EnvName) -> NodeName = EnvName
+      ; format(atom(NodeName), 'node-~w', [Port]))),
+    %% --agents a1,a2,a3
+    (parse_flag(Argv, '--agents', AgentsAtom) ->
+        atomic_list_concat(AgentFilter, ',', AgentsAtom)
+    ; AgentFilter = []).
+
+parse_flag([Flag, Value | _], Flag, Value) :- !.
+parse_flag([_ | Rest], Flag, Value) :- parse_flag(Rest, Flag, Value).
+
+%% auto_connect_peers/0 - Connect to peers listed in DALI2_PEERS env var
+%%   Format: name1@http://host1:port1,name2@http://host2:port2
+%%   Starts a background thread that retries sync for peers that aren't ready yet.
+auto_connect_peers :-
+    (getenv('DALI2_PEERS', PeersStr), PeersStr \= '' ->
+        atomic_list_concat(PeerSpecs, ',', PeersStr),
+        forall(member(Spec, PeerSpecs), connect_peer_spec(Spec)),
+        %% Start background retry for unsynced peers
+        thread_create(peer_sync_retry_loop, _, [detached(true)])
+    ; true).
+
+connect_peer_spec(Spec) :-
+    (sub_atom(Spec, Before, 1, _, '@') ->
+        sub_atom(Spec, 0, Before, _, Name),
+        After is Before + 1,
+        sub_atom(Spec, After, _, 0, Url),
+        format("Connecting to peer: ~w at ~w~n", [Name, Url]),
+        catch(federation:fed_register_peer(Name, Url), E,
+            format(user_error, "Failed to connect to ~w: ~w~n", [Name, E]))
+    ;
+        format(user_error, "Invalid peer spec (expected name@url): ~w~n", [Spec])
+    ).
+
+%% peer_sync_retry_loop/0 - Retry syncing with peers that have empty agent lists
+peer_sync_retry_loop :-
+    peer_sync_retry_loop(10).   % Up to 10 retries
+
+peer_sync_retry_loop(0) :- !.
+peer_sync_retry_loop(N) :-
+    sleep(3),
+    findall(Name, (federation:peer(Name, _, Agents), Agents == []), Unsynced),
+    (Unsynced == [] ->
+        format(user_error, "[Federation] All peers synced~n", [])
+    ;
+        format(user_error, "[Federation] Retrying sync for: ~w~n", [Unsynced]),
+        forall(member(P, Unsynced),
+            catch(federation:fed_sync_peer(P), _, true)),
+        N1 is N - 1,
+        peer_sync_retry_loop(N1)
+    ).
 
 %% ============================================================
 %% STATIC FILE SERVING
@@ -131,7 +204,12 @@ api_status(_Request) :-
     (current_agent_file(F) -> File = F ; File = ''),
     (ai_oracle:ai_available -> AI = true ; AI = false),
     (ai_oracle:ai_model(Model) -> true ; Model = 'none'),
-    reply_json_dict(_{status: running, agents: Count, file: File, ai_enabled: AI, ai_model: Model}).
+    federation:fed_node_name(NodeName),
+    federation:fed_peers(Peers),
+    length(Peers, PeerCount),
+    reply_json_dict(_{status: running, agents: Count, file: File,
+                      ai_enabled: AI, ai_model: Model,
+                      node: NodeName, peers: PeerCount}).
 
 %% GET /api/agents - List agents with status
 api_agents(_Request) :-
@@ -396,4 +474,74 @@ api_ai_ask(Request) :-
         Error,
         (term_to_atom(Error, ErrAtom),
          reply_json_dict(_{ok: false, error: ErrAtom}))
+    ).
+
+%% ============================================================
+%% FEDERATION API HANDLERS
+%% ============================================================
+
+%% GET /api/peers - List known peer instances
+api_peers(_Request) :-
+    cors_enable,
+    federation:fed_node_name(MyName),
+    federation:fed_node_url(MyUrl),
+    federation:fed_peers(Peers),
+    reply_json_dict(_{node: MyName, url: MyUrl, peers: Peers}).
+
+%% POST /api/peers/register - Register a peer instance
+%%   Body: {"name": "node2", "url": "http://host:port"}
+api_peer_register(Request) :-
+    cors_enable,
+    http_read_json_dict(Request, Dict),
+    atom_string(Name, Dict.name),
+    atom_string(Url, Dict.url),
+    catch(
+        (federation:fed_register_peer(Name, Url),
+         reply_json_dict(_{ok: true, message: "Peer registered"})),
+        Error,
+        (term_to_atom(Error, E),
+         reply_json_dict(_{ok: false, error: E}))
+    ).
+
+%% POST /api/peers/unregister - Remove a peer
+%%   Body: {"name": "node2"}
+api_peer_unregister(Request) :-
+    cors_enable,
+    http_read_json_dict(Request, Dict),
+    atom_string(Name, Dict.name),
+    federation:fed_unregister_peer(Name),
+    reply_json_dict(_{ok: true, message: "Peer unregistered"}).
+
+%% POST /api/peers/sync - Sync agent lists with all peers
+api_peer_sync(_Request) :-
+    cors_enable,
+    catch(
+        (federation:fed_sync_all,
+         reply_json_dict(_{ok: true, message: "Synced"})),
+        Error,
+        (term_to_atom(Error, E),
+         reply_json_dict(_{ok: false, error: E}))
+    ).
+
+%% GET /api/remote/agents - List local agents (called by peers during sync)
+api_remote_agents(_Request) :-
+    cors_enable,
+    bb_agents(LocalAgents),
+    reply_json_dict(_{agents: LocalAgents}).
+
+%% POST /api/remote/receive - Receive a message from a remote peer
+%%   Body: {"from": "agent_name", "to": "agent_name", "content": "term_string"}
+api_remote_receive(Request) :-
+    cors_enable,
+    http_read_json_dict(Request, Dict),
+    atom_string(From, Dict.from),
+    atom_string(To, Dict.to),
+    atom_string(ContentStr, Dict.content),
+    catch(
+        (term_string(Content, ContentStr),
+         communication:deliver_remote(From, To, Content),
+         reply_json_dict(_{ok: true})),
+        Error,
+        (term_to_atom(Error, E),
+         reply_json_dict(_{ok: false, error: E}))
     ).
