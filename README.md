@@ -36,19 +36,177 @@ $env:OPENAI_API_KEY="sk-your-key"; docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080) in your browser.
 
-### Distributed Mode (multiple machines)
+### Distributed Mode — Running Agents Across Multiple Devices
 
-Run agents across separate containers that communicate via HTTP federation:
+DALI2 supports splitting agents from the **same** agent file across multiple nodes.
+Each node loads the full file but starts only selected agents via `--agents`.
+Nodes discover each other's agents and route messages transparently over HTTP.
+
+Below is a complete walkthrough using the **agriculture** example, splitting 6 agents across 2 nodes.
+
+#### Agent split
+
+| Node | Name | Agents | Role |
+|------|------|--------|------|
+| Node A | `sensors` | `soil_sensor`, `weather_monitor`, `logger` | Field sensors + logging |
+| Node B | `advisors` | `crop_advisor`, `irrigation_controller`, `farmer_agent` | Decision-making |
+
+When `soil_sensor` sends a message to `crop_advisor`, DALI2 automatically forwards it over HTTP to Node B.
+When `irrigation_controller` sends to `logger`, it goes back to Node A. No code changes needed.
+
+#### Option 1: Two Docker containers on the same machine
+
+Open **two terminals** and run one container each:
+
+```sh
+# Terminal 1 — sensors node (port 8081)
+docker run --rm -p 8081:8080 \
+  -v ./examples:/dali2/examples \
+  --name agri-sensors \
+  dali2 8080 examples/agriculture.pl --name sensors \
+  --agents soil_sensor,weather_monitor,logger
+
+# Terminal 2 — advisors node (port 8082)
+docker run --rm -p 8082:8080 \
+  -v ./examples:/dali2/examples \
+  --name agri-advisors \
+  dali2 8080 examples/agriculture.pl --name advisors \
+  --agents crop_advisor,irrigation_controller,farmer_agent
+```
+
+Then connect the peers. Since Docker containers are isolated, create a shared network:
+
+```sh
+docker network create dali2-net
+docker network connect dali2-net agri-sensors
+docker network connect dali2-net agri-advisors
+```
+
+Register each node as a peer of the other (use container names as hostnames):
+
+```sh
+# Tell sensors node about advisors
+curl -X POST http://localhost:8081/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"advisors","url":"http://agri-advisors:8080"}'
+
+# Tell advisors node about sensors
+curl -X POST http://localhost:8082/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"sensors","url":"http://agri-sensors:8080"}'
+```
+
+> **PowerShell equivalent:**
+> ```powershell
+> Invoke-RestMethod -Uri "http://localhost:8081/api/peers/register" -Method Post `
+>   -ContentType "application/json" `
+>   -Body '{"name":"advisors","url":"http://agri-advisors:8080"}'
+>
+> Invoke-RestMethod -Uri "http://localhost:8082/api/peers/register" -Method Post `
+>   -ContentType "application/json" `
+>   -Body '{"name":"sensors","url":"http://agri-sensors:8080"}'
+> ```
+
+#### Option 2: Two separate machines
+
+On **Machine A** (e.g. `192.168.1.10`):
+
+```sh
+docker run --rm -p 8080:8080 \
+  -v ./examples:/dali2/examples \
+  dali2 8080 examples/agriculture.pl --name sensors \
+  --agents soil_sensor,weather_monitor,logger
+```
+
+On **Machine B** (e.g. `192.168.1.20`):
+
+```sh
+docker run --rm -p 8080:8080 \
+  -v ./examples:/dali2/examples \
+  dali2 8080 examples/agriculture.pl --name advisors \
+  --agents crop_advisor,irrigation_controller,farmer_agent
+```
+
+Connect them using real IP addresses:
+
+```sh
+# From Machine A (or any machine)
+curl -X POST http://192.168.1.10:8080/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"advisors","url":"http://192.168.1.20:8080"}'
+
+curl -X POST http://192.168.1.20:8080/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"sensors","url":"http://192.168.1.10:8080"}'
+```
+
+> You can also connect peers from the **Web UI**: open the Federation panel in the left sidebar,
+> enter the peer name and URL, and click **Connect**.
+
+#### Option 3: Without Docker (two shells, SWI-Prolog)
+
+Requires [SWI-Prolog](https://www.swi-prolog.org/) installed locally.
+
+```sh
+# Shell 1 — sensors on port 8081
+swipl -l src/server.pl -g main -t halt -- 8081 examples/agriculture.pl \
+  --name sensors --agents soil_sensor,weather_monitor,logger
+
+# Shell 2 — advisors on port 8082
+swipl -l src/server.pl -g main -t halt -- 8082 examples/agriculture.pl \
+  --name advisors --agents crop_advisor,irrigation_controller,farmer_agent
+```
+
+Connect them (both are on localhost, different ports):
+
+```sh
+curl -X POST http://localhost:8081/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"advisors","url":"http://localhost:8082"}'
+
+curl -X POST http://localhost:8082/api/peers/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"sensors","url":"http://localhost:8081"}'
+```
+
+#### Testing the distributed setup
+
+Send a soil reading to the sensor on Node A:
+
+```sh
+curl -X POST http://localhost:8081/api/send \
+  -H "Content-Type: application/json" \
+  -d '{"to":"soil_sensor","content":"read_soil(25, 6.5, north_field)"}'
+```
+
+Expected chain of events across both nodes:
+
+1. **soil_sensor** (Node A) receives `read_soil`, sends `soil_data` → **crop_advisor** (Node B) via federation
+2. **crop_advisor** (Node B) detects low moisture (25 < 30), sends `irrigate` → **irrigation_controller** (Node B, local)
+3. **crop_advisor** sends `notify(low_moisture)` → **farmer_agent** (Node B, local)
+4. **irrigation_controller** (Node B) activates irrigation, sends `log_event` → **logger** (Node A) via federation
+5. **farmer_agent** (Node B) logs the notification
+6. **logger** (Node A) receives and logs events from both local and remote agents
+
+Check the logs of each node to verify:
+
+```sh
+# Node A logs
+docker logs agri-sensors
+
+# Node B logs
+docker logs agri-advisors
+```
+
+#### Pre-configured distributed example (emergency)
+
+A ready-made two-node example is also included:
 
 ```sh
 docker compose -f docker-compose.distributed.yml up --build
 ```
 
-This starts two nodes:
-- **sensors** (`http://localhost:8081`) — sensor + logger agents
-- **responders** (`http://localhost:8082`) — coordinator + evacuator + responder + communicator
-
-Agents automatically discover each other and route messages across nodes.
+This starts `sensors` on port 8081 and `responders` on port 8082, auto-connected via `DALI2_PEERS` env var.
 
 ### Windows
 
@@ -56,18 +214,6 @@ Run `run.bat` — choose single or distributed mode interactively:
 
 ```sh
 run.bat
-```
-
-### Without Docker
-
-Requires [SWI-Prolog](https://www.swi-prolog.org/) installed locally.
-
-```sh
-# Single instance
-swipl -l src/server.pl -g main -t halt -- 8080 examples/agriculture.pl
-
-# Named node with agent filter
-swipl -l src/server.pl -g main -t halt -- 8080 examples/emergency_sensors.pl --name sensors
 ```
 
 ## Agent Language
