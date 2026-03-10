@@ -80,14 +80,21 @@ main :-
         format("No agent file specified. Use the web UI to load agents.~n"),
         assert(current_agent_file(''))
     ),
-    format("Web UI: http://localhost:~w~n~n", [Port]),
+    format("Server listening on port ~w~n", [Port]),
+    format("(If using Docker with port mapping, open the mapped host port in your browser)~n~n"),
     http_server(http_dispatch, [port(Port)]),
+    %% Handle SIGINT/SIGTERM for clean shutdown (e.g. CTRL+C in Docker)
+    on_signal(int, _, signal_stop),
+    on_signal(term, _, signal_stop),
     %% Set own URL (for peer registration handshakes)
     format(atom(SelfUrl), "http://localhost:~w", [Port]),
     federation:fed_set_url(SelfUrl),
     %% Auto-connect to peers from DALI2_PEERS env var (comma-separated name@url)
     auto_connect_peers,
     thread_get_message(stop_server).
+
+signal_stop(_Signal) :-
+    thread_send_message(main, stop_server).
 
 :- dynamic current_agent_file/1.
 
@@ -256,7 +263,7 @@ api_logs(Request) :-
     ),
     reply_json_dict(_{logs: Entries}).
 
-%% POST /api/send - Send a message to an agent
+%% POST /api/send - Send a message to an agent (local or remote)
 %%   Body: {"to": "agent_name", "content": "event(args)"}
 api_send(Request) :-
     cors_enable,
@@ -265,7 +272,18 @@ api_send(Request) :-
     atom_string(ContentStr, Dict.content),
     catch(
         (term_string(Content, ContentStr),
-         engine:inject_event(To, Content),
+         (federation:fed_is_local(To) ->
+             %% Local agent — inject directly
+             engine:inject_event(To, Content)
+         ;
+             %% Remote agent — forward via federation
+             (federation:fed_find_agent(To, PeerName) ->
+                 federation:fed_remote_send(PeerName, user, To, Content)
+             ;
+                 %% Agent not found anywhere, try local inject anyway
+                 engine:inject_event(To, Content)
+             )
+         ),
          reply_json_dict(_{ok: true, message: "Message sent"})
         ),
         Error,

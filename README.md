@@ -60,14 +60,14 @@ Open **two terminals** and run one container each:
 
 ```sh
 # Terminal 1 — sensors node (port 8081)
-docker run --rm -p 8081:8080 \
+docker run --rm --init -p 8081:8080 \
   -v ./examples:/dali2/examples \
   --name agri-sensors \
   dali2 8080 examples/agriculture.pl --name sensors \
   --agents soil_sensor,weather_monitor,logger
 
 # Terminal 2 — advisors node (port 8082)
-docker run --rm -p 8082:8080 \
+docker run --rm --init -p 8082:8080 \
   -v ./examples:/dali2/examples \
   --name agri-advisors \
   dali2 8080 examples/agriculture.pl --name advisors \
@@ -112,7 +112,7 @@ curl -X POST http://localhost:8082/api/peers/register \
 On **Machine A** (e.g. `192.168.1.10`):
 
 ```sh
-docker run --rm -p 8080:8080 \
+docker run --rm --init -p 8080:8080 \
   -v ./examples:/dali2/examples \
   dali2 8080 examples/agriculture.pl --name sensors \
   --agents soil_sensor,weather_monitor,logger
@@ -121,7 +121,7 @@ docker run --rm -p 8080:8080 \
 On **Machine B** (e.g. `192.168.1.20`):
 
 ```sh
-docker run --rm -p 8080:8080 \
+docker run --rm --init -p 8080:8080 \
   -v ./examples:/dali2/examples \
   dali2 8080 examples/agriculture.pl --name advisors \
   --agents crop_advisor,irrigation_controller,farmer_agent
@@ -207,6 +207,31 @@ docker compose -f docker-compose.distributed.yml up --build
 ```
 
 This starts `sensors` on port 8081 and `responders` on port 8082, auto-connected via `DALI2_PEERS` env var.
+
+#### Cleanup
+
+When using **Option 1** (two containers on the same machine), stop and clean up with:
+
+```sh
+# Stop both containers (or press CTRL+C in each terminal)
+docker stop agri-sensors agri-advisors
+
+# Remove the shared network
+docker network rm dali2-net
+```
+
+For `docker compose` setups, simply use:
+
+```sh
+# Single instance
+docker compose down
+
+# Distributed
+docker compose -f docker-compose.distributed.yml down
+```
+
+> **Tip:** The `--init` flag (used above) and `init: true` in docker-compose files ensure that
+> CTRL+C stops containers cleanly. Without it, `swipl` as PID 1 may not handle signals correctly.
 
 ### Windows
 
