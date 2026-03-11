@@ -35,6 +35,12 @@ thermostat:internal(startup_diagnostic, times(3)) :-
     log("Running startup diagnostic..."),
     assert_belief(diagnostic_done).
 
+%% Internal event with trigger condition:
+%% fires only when the thermostat believes mode is cooling
+thermostat:internal(cooling_monitor, [forever, trigger(believes(mode(cooling)))]) :-
+    believes(current_temp(T)),
+    log("TRIGGERED INTERNAL: Monitoring cooling, current temp: ~w", [T]).
+
 %% Constraint: temperature must stay below 50
 thermostat:constraint(believes(current_temp(T)), T < 50) :-
     log("CONSTRAINT VIOLATED: Temperature ~w exceeds safe limit!", [T]),
@@ -132,6 +138,13 @@ coordinator:tell(calibration_done).
 coordinator:tell(response(_)).
 coordinator:tell(log_event(_, _, _)).
 coordinator:tell(system_ready).
+%% Tell/told also apply to AI oracle queries and responses:
+%% - tell rules filter what queries can be sent to the oracle
+%% - told rules filter what responses are accepted from the oracle
+%% Example: coordinator can send analysis queries to the oracle
+coordinator:tell(analyze(_)).
+%% The told rules above also filter oracle responses:
+%% only sensor_data(_), alert(_,_), emergency(_,_), etc. are accepted.
 
 %% Multi-event: fire when both sensor data AND an alert have been received
 coordinator:on_all([sensor_data(_), alert(_, _)]) :-
@@ -153,10 +166,15 @@ coordinator:on(alert(Type, Value)) :-
     retract_belief(alerts_received(N)),
     assert_belief(alerts_received(N1)).
 
-%% React to emergency
+%% React to emergency (with optional AI oracle analysis, filtered by tell/told)
 coordinator:on(emergency(Type, Value)) :-
     log("EMERGENCY: ~w = ~w", [Type, Value]),
-    send(logger, log_event(emergency, coordinator, [Type, Value])).
+    send(logger, log_event(emergency, coordinator, [Type, Value])),
+    %% If AI is available, ask for analysis (tell/told rules apply)
+    ( ai_available ->
+        ask_ai(analyze(emergency(Type, Value)), Advice),
+        log("AI advice for emergency: ~w", [Advice])
+    ; true ).
 
 %% React to calibration requests
 coordinator:on(calibration_request) :-

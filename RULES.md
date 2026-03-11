@@ -101,10 +101,13 @@ agent:internal(Event, Options).                     %% body = true
 | `forever` | Fire every cycle (default) |
 | `times(N)` | Fire at most N times total |
 | `until(Condition)` | Fire until Condition becomes true |
+| `trigger(Condition)` | Fire only when Condition is true (start condition) |
 | `between(time(H1,M1), time(H2,M2))` | Fire only during a time window (hours:minutes) |
 | `between(date(Y1,Mo1,D1), date(Y2,Mo2,D2))` | Fire only during a date range |
 
 Options can be combined in a list: `[times(10), between(time(9,0), time(17,0))]`.
+
+The `trigger(Condition)` option is particularly important: it acts as a **start condition** (or guard) that must be satisfied before the internal event fires. The condition is evaluated each cycle using the same condition evaluation as `when` rules (supports `believes(...)`, `has_past(...)`, `learned(...)`, `bb_read(...)`, arithmetic comparisons, etc.). This mirrors DALI's internal events which also had start conditions.
 
 **Examples:**
 
@@ -134,6 +137,16 @@ reporter:internal(report, [times(5), between(time(9,0), time(18,0))]) :-
 %% Fire only during a specific date range
 event_agent:internal(countdown, between(date(2026,3,1), date(2026,3,15))) :-
     log("Event period active!").
+
+%% Fire only when a condition holds (trigger/start condition)
+thermostat:internal(cooling_monitor, [forever, trigger(believes(mode(cooling)))]) :-
+    believes(current_temp(T)),
+    log("Monitoring cooling, temp: ~w", [T]).
+
+%% Combined: triggered + limited repetitions
+robot:internal(charge_check, [times(10), trigger(believes(battery_low))]) :-
+    log("Battery low! Checking charge level..."),
+    do(check_battery).
 ```
 
 Each internal event is tracked: the engine counts how many times it has fired and records each firing in past memory as `internal(Event)`.
@@ -366,6 +379,15 @@ agent:tell(Pattern).                   %% allowed to send Pattern
 
 If an agent has **any** `tell` rules, only messages matching at least one `tell` pattern can be sent. Others are blocked. If an agent has **no** `tell` rules, all messages are allowed.
 
+### AI Oracle Filtering
+
+Tell/told rules also apply to **AI Oracle** queries and responses:
+
+- **Tell rules** filter the query context sent to the oracle. If the query doesn't match any `tell` pattern, the oracle call is blocked and returns `blocked(Context)`.
+- **Told rules** filter the response received from the oracle. If the response doesn't match any `told` pattern, it is rejected and returns `rejected(RawResponse)`.
+
+This ensures agents can control what information they share with the AI oracle and what advice they accept back.
+
 **Examples:**
 
 ```prolog
@@ -377,6 +399,22 @@ sensor:tell(status(_)).
 coordinator:told(alarm(_,_), 100).     %% high priority
 coordinator:told(report(_,_), 50).     %% lower priority
 coordinator:told(status(_)).           %% default priority 0
+
+%% Tell/told for AI Oracle:
+%% Agent can query the oracle with analyze(...) terms
+advisor:tell(analyze(_)).
+%% Agent only accepts suggestion(...) responses from the oracle
+advisor:told(suggestion(_), 100).
+advisor:told(recommendation(_,_), 50).
+
+%% In a rule body:
+advisor:on(critical_event(Data)) :-
+    ask_ai(analyze(Data), Response),
+    %% Response will be:
+    %%   - The actual AI response if both tell and told checks pass
+    %%   - blocked(analyze(Data)) if tell rule blocks the query
+    %%   - rejected(RawResponse) if told rule rejects the response
+    log("AI response: ~w", [Response]).
 ```
 
 ---
@@ -611,9 +649,11 @@ These predicates are available inside rule bodies:
 
 | Predicate | Description |
 |-----------|-------------|
-| `ask_ai(Context, Result)` | Query ChatGPT, get a Prolog fact back |
-| `ask_ai(Context, Prompt, Result)` | Query with custom system prompt |
+| `ask_ai(Context, Result)` | Query ChatGPT, get a Prolog fact back (filtered by tell/told) |
+| `ask_ai(Context, Prompt, Result)` | Query with custom system prompt (filtered by tell/told) |
 | `ai_available` | Check if AI oracle is configured |
+
+Tell/told rules apply to oracle calls: **tell** filters the query context, **told** filters the response. If blocked, `Result` is `blocked(Context)` or `rejected(RawResponse)`.
 
 ### Standard Prolog
 

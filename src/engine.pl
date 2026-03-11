@@ -350,6 +350,9 @@ check_single_internal_opt(_, _, between(time(H1,M1), time(H2,M2)), Now) :-
     CurrentMinutes >= StartMinutes,
     CurrentMinutes =< EndMinutes.
 
+check_single_internal_opt(Name, _, trigger(Condition), _) :-
+    catch(call_condition(Name, Condition), _, fail).
+
 check_single_internal_opt(_, _, between(date(Y1,Mo1,D1), date(Y2,Mo2,D2)), Now) :-
     stamp_date_time(Now, DateTime, local),
     date_time_value(year, DateTime, Y),
@@ -735,17 +738,39 @@ execute_body(Name, helper(Goal)) :- !,
         log_agent(Name, "Unknown helper: ~w", [Goal])
     ).
 
-% ask_ai(Context, Result) - Query the AI oracle
+% ask_ai(Context, Result) - Query the AI oracle (with tell/told filtering)
 execute_body(Name, ask_ai(Context, Result)) :- !,
-    log_agent(Name, "Querying AI oracle: ~w", [Context]),
-    ai_oracle:ask_ai(Context, Result),
-    log_agent(Name, "AI oracle response: ~w", [Result]).
+    (should_allow_send(Name, Context) ->
+        log_agent(Name, "Querying AI oracle: ~w", [Context]),
+        ai_oracle:ask_ai(Context, RawResult),
+        (should_allow_receive(Name, RawResult, _) ->
+            Result = RawResult,
+            log_agent(Name, "AI oracle response: ~w", [Result])
+        ;
+            log_agent(Name, "AI oracle response rejected by told rule: ~w", [RawResult]),
+            Result = rejected(RawResult)
+        )
+    ;
+        log_agent(Name, "AI oracle query blocked by tell rule: ~w", [Context]),
+        Result = blocked(Context)
+    ).
 
-% ask_ai(Context, SystemPrompt, Result) - Query AI oracle with custom prompt
+% ask_ai(Context, SystemPrompt, Result) - Query AI oracle with custom prompt (with tell/told filtering)
 execute_body(Name, ask_ai(Context, SystemPrompt, Result)) :- !,
-    log_agent(Name, "Querying AI oracle: ~w", [Context]),
-    ai_oracle:ask_ai(Context, SystemPrompt, Result),
-    log_agent(Name, "AI oracle response: ~w", [Result]).
+    (should_allow_send(Name, Context) ->
+        log_agent(Name, "Querying AI oracle: ~w", [Context]),
+        ai_oracle:ask_ai(Context, SystemPrompt, RawResult),
+        (should_allow_receive(Name, RawResult, _) ->
+            Result = RawResult,
+            log_agent(Name, "AI oracle response: ~w", [Result])
+        ;
+            log_agent(Name, "AI oracle response rejected by told rule: ~w", [RawResult]),
+            Result = rejected(RawResult)
+        )
+    ;
+        log_agent(Name, "AI oracle query blocked by tell rule: ~w", [Context]),
+        Result = blocked(Context)
+    ).
 
 % ai_available - Check if AI oracle is configured
 execute_body(_, ai_available) :- !,

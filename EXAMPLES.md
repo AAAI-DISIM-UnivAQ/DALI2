@@ -207,16 +207,16 @@ Demonstrates **all DALI2 rule types** and DSL predicates. This is the comprehens
 
 | Agent | Role | Features Demonstrated |
 |-------|------|----------------------|
-| `thermostat` | Temperature control | Internal events, constraints, on_change, beliefs |
+| `thermostat` | Temperature control | Internal events (incl. triggered), constraints, on_change, beliefs |
 | `sensor` | Sensor readings | Periodic tasks, present events, learning, goals, blackboard |
-| `coordinator` | Central coordination | Reactive rules, tell/told filtering, multi-events, goals |
+| `coordinator` | Central coordination | Reactive rules, tell/told filtering (incl. AI oracle), multi-events, goals |
 | `logger` | Semantic logging | Ontology-aware matching, helpers |
 
 ### Features Tested
 
 | # | Feature | Agent | How to Trigger |
 |---|---------|-------|----------------|
-| 1 | **Internal events** | thermostat | Automatic — `temp_check` fires every cycle, `startup_diagnostic` fires 3 times |
+| 1 | **Internal events** | thermostat | Automatic — `temp_check` fires every cycle, `startup_diagnostic` fires 3 times, `cooling_monitor` fires only when mode=cooling |
 | 2 | **Periodic tasks** | sensor | Automatic — heartbeat every 15 seconds |
 | 3 | **Goals (achieve)** | sensor | Automatic — calibration goal keeps trying until achieved |
 | 4 | **Goals (test)** | coordinator | Automatic — tests if alerts received (fires once) |
@@ -228,9 +228,11 @@ Demonstrates **all DALI2 rule types** and DSL predicates. This is the comprehens
 | 10 | **Present events** | sensor | Blackboard data triggers environment observation |
 | 11 | **Multi-events** | coordinator | Both `sensor_data` AND `alert` in past triggers on_all |
 | 12 | **Tell/told filtering** | coordinator | Only accepts specific message patterns |
-| 13 | **Ontology** | logger | `log_event` matches `log_entry` via `same_as` |
-| 14 | **Helpers** | logger | `count_logs` helper tracks log entries |
-| 15 | **Blackboard** | sensor | Writes environment data to shared blackboard |
+| 13 | **Tell/told for AI oracle** | coordinator | Oracle queries filtered by tell, responses by told |
+| 14 | **Triggered internal** | thermostat | `cooling_monitor` fires only when `believes(mode(cooling))` |
+| 15 | **Ontology** | logger | `log_event` matches `log_entry` via `same_as` |
+| 16 | **Helpers** | logger | `count_logs` helper tracks log entries |
+| 17 | **Blackboard** | sensor | Writes environment data to shared blackboard |
 
 ### Test Commands — Step by Step
 
@@ -240,7 +242,7 @@ swipl -l src/server.pl -g main -- 8080 examples/showcase.pl
 ```
 
 **Automatic behavior on startup:**
-- thermostat: internal events fire (`temp_check` every cycle, `startup_diagnostic` 3 times)
+- thermostat: internal events fire (`temp_check` every cycle, `startup_diagnostic` 3 times). The `cooling_monitor` does **not** fire yet (mode is `idle`)
 - sensor: periodic heartbeat, achieve goal sends calibration requests
 - coordinator: calibrates sensor, test goal checks for alerts
 - After ~4 seconds: sensor calibration achieved
@@ -258,8 +260,10 @@ curl -X POST http://localhost:8080/api/send \
 - **Present event**: blackboard data detected, sends `update_temp(85)` to thermostat
 - Thermostat updates temp to 85, activates cooling mode
 - **On_change**: "Cooling mode just activated" (fires once)
+- **Triggered internal**: `cooling_monitor` now fires: "TRIGGERED INTERNAL: Monitoring cooling, current temp: 85" (was inactive while mode=idle)
 - **Constraint violated**: 85 > 50 → "Temperature 85 exceeds safe limit!"
 - Thermostat sends `emergency(overheating, 85)` to coordinator
+- **Tell/told for AI oracle**: coordinator's emergency handler calls `ask_ai` if AI is configured (tell rule `analyze(_)` allows the query; told rules filter the response)
 - Logger receives `log_event` → ontology-aware matching works
 
 ```bash

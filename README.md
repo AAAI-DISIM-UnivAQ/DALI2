@@ -261,6 +261,10 @@ my_agent:on(some_event(Arg1, Arg2)) :-
 my_agent:internal(check_status, [between(time(9,0), time(17,0))]) :-
     log("Checking status during work hours").
 
+%% Internal event with trigger (fires only when condition is true)
+my_agent:internal(cooling_check, [forever, trigger(believes(mode(cooling)))]) :-
+    log("Cooling mode active, monitoring...").
+
 %% Periodic task (runs every N seconds)
 my_agent:every(10, log("Heartbeat")).
 
@@ -285,10 +289,11 @@ my_agent:constraint(believes(temperature(T)), T < 100) :-
     log("CRITICAL: Temperature constraint violated!"),
     send(safety, emergency_shutdown).
 
-%% Tell/told communication filtering
+%% Tell/told communication filtering (also applies to AI oracle queries/responses)
 my_agent:told(alarm(_)).              %% Accept alarm messages
 my_agent:told(status(_), 100).        %% Accept status with priority 100
 my_agent:tell(report(_)).             %% Only allowed to send report messages
+my_agent:tell(analyze(_)).            %% Allow sending analyze queries to AI oracle
 
 %% Ontology declarations
 my_agent:ontology(same_as(hot, warm)).
@@ -317,7 +322,7 @@ my_agent:believes(status(idle)).
 | Rule | Syntax | Description |
 |------|--------|-------------|
 | **Reactive** | `agent:on(Event) :- Body.` | React to external events/messages |
-| **Internal** | `agent:internal(Event, Options) :- Body.` | Proactive events with conditions |
+| **Internal** | `agent:internal(Event, Options) :- Body.` | Proactive events with conditions/triggers |
 | **Periodic** | `agent:every(Seconds, Goal).` | Runs at fixed intervals |
 | **Monitor** | `agent:when(Condition) :- Body.` | Level-triggered condition check |
 | **On-change** | `agent:on_change(Condition) :- Body.` | Edge-triggered (fires once) |
@@ -325,8 +330,8 @@ my_agent:believes(status(idle)).
 | **Multi-event** | `agent:on_all([E1, E2, ...]) :- Body.` | Fires when all events occurred |
 | **Constraint** | `agent:constraint(Condition) :- Body.` | Invariant checking |
 | **Goal** | `agent:goal(achieve/test, Goal) :- Plan.` | Goal-directed behavior |
-| **Told** | `agent:told(Pattern, Priority).` | Accept message filter |
-| **Tell** | `agent:tell(Pattern).` | Send message filter |
+| **Told** | `agent:told(Pattern, Priority).` | Accept message filter (also filters AI oracle responses) |
+| **Tell** | `agent:tell(Pattern).` | Send message filter (also filters AI oracle queries) |
 | **Ontology** | `agent:ontology(Declaration).` | Semantic equivalences |
 | **Learning** | `agent:learn_from(Event, Outcome) :- Body.` | Learn from experience |
 | **Action** | `agent:do(Action) :- Body.` | Named actions |
@@ -356,8 +361,8 @@ my_agent:believes(status(idle)).
 | `bb_read(Pattern)` | Read from shared blackboard |
 | `bb_write(Tuple)` | Write to shared blackboard |
 | `bb_remove(Pattern)` | Remove from shared blackboard |
-| `ask_ai(Context, Result)` | Query the AI oracle |
-| `ask_ai(Context, Prompt, Result)` | Query AI with custom system prompt |
+| `ask_ai(Context, Result)` | Query the AI oracle (filtered by tell/told) |
+| `ask_ai(Context, Prompt, Result)` | Query AI with custom prompt (filtered by tell/told) |
 | `ai_available` | Check if AI oracle is configured |
 
 All standard Prolog predicates (arithmetic, comparison, list operations, etc.) are also available.
@@ -479,8 +484,8 @@ DALI2/
 | Docker setup | Complex (SICStus install) | Simple (swipl base image) |
 | Event syntax | `eventE(X) :> body.` | `agent:on(event(X)) :- body.` |
 | Message sending | `messageA(dest, send_message(ev(X), Me))` | `send(dest, ev(X))` |
-| Internal events | `internal_event/5` with `forever`/`until_cond`/`in_date` | `agent:internal(event, [options]) :- body.` |
-| Tell/told | `told(_,inform(_),70)` in communication.con | `agent:told(pattern, priority).` |
+| Internal events | `internal_event/5` with `forever`/`until_cond`/`in_date` | `agent:internal(event, [options]) :- body.` with `trigger(Cond)` |
+| Tell/told | `told(_,inform(_),70)` in communication.con | `agent:told(pattern, priority).` (also filters AI oracle) |
 | Condition-action | `cond :< action.` | `agent:on_change(cond) :- body.` |
 | Present events | `en(X)` with suffix N | `agent:on_present(cond) :- body.` |
 | Multi-events | `mul/1` | `agent:on_all([e1, e2]) :- body.` |
