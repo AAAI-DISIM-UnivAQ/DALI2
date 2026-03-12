@@ -278,15 +278,15 @@ api_send(Request) :-
     catch(
         (term_string(Content, ContentStr),
          (federation:fed_is_local(To) ->
-             %% Local agent — inject directly
-             engine:inject_event(To, Content)
+             %% Local agent — send via communication layer (respects told filtering)
+             communication:send(user, To, Content)
          ;
              %% Remote agent — forward via federation
              (federation:fed_find_agent(To, PeerName) ->
                  federation:fed_remote_send(PeerName, user, To, Content)
              ;
-                 %% Agent not found anywhere, try local inject anyway
-                 engine:inject_event(To, Content)
+                 %% Agent not found anywhere, try local send anyway
+                 communication:send(user, To, Content)
              )
          ),
          reply_json_dict(_{ok: true, message: "Message sent"})

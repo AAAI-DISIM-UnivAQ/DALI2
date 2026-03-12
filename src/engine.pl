@@ -776,8 +776,8 @@ execute_body(Name, (Cond -> Then)) :- !,
     (execute_body(Name, Cond) ->
         execute_body(Name, Then)
     ; true).
-execute_body(_, \+(Goal)) :- !,
-    \+(call(Goal)).
+execute_body(Name, \+(Goal)) :- !,
+    \+(execute_body(Name, Goal)).
 execute_body(Name, not(Goal)) :- !,
     \+(execute_body(Name, Goal)).
 
@@ -822,17 +822,23 @@ execute_body(Name, retract_belief(Fact)) :- !,
 
 % believes(Fact) - Check if agent has a belief (ontology-aware)
 execute_body(Name, believes(Fact)) :- !,
-    (agent_belief_rt(Name, Fact) -> true
+    (agent_belief_rt(Name, Fact)
     ; agent_belief_rt(Name, Other), ontology_match(Name, Fact, Other)
     ).
 
 % has_past(Event) - Check if event is in past
 execute_body(Name, has_past(Event)) :- !,
-    agent_past_event(Name, Event, _, _).
+    (agent_past_event(Name, Event, _, _) -> true
+    ; event_in_past(Name, Event)
+    ).
 
 % has_past(Event, Time) - Check past with time
 execute_body(Name, has_past(Event, Time)) :- !,
-    agent_past_event(Name, Event, Time, _).
+    (agent_past_event(Name, Event, Time, _) -> true
+    ; agent_past_event(Name, received(Event, _), Time, _) -> true
+    ; agent_past_event(Name, injected(Event), Time, _) -> true
+    ; agent_past_event(Name, internal(Event), Time, _)
+    ).
 
 % do(Action) - Execute an action defined with agent:do
 execute_body(Name, do(Action)) :- !,
@@ -968,8 +974,9 @@ execute_body(Name, achieve(Goal)) :- !,
 
 % reset_goal(Goal) - Reset a goal so it can be re-attempted
 execute_body(Name, reset_goal(Goal)) :- !,
-    term_to_atom(Goal, GoalId),
+    goal_canonical_id(Goal, GoalId),
     retractall(agent_goal_status(Name, GoalId, _)),
+    retractall(agent_residue_goal(Name, GoalId, _)),
     log_agent(Name, "Goal reset: ~w", [Goal]).
 
 % bb_read(Pattern) - Read from shared blackboard
