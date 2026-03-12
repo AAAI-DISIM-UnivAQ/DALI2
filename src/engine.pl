@@ -160,32 +160,22 @@ agent_loop(Name, Options) :-
 
 agent_loop_inner(Name, Options) :-
     (agent_running(Name) ->
-        % 1. Process incoming messages (with priority ordering)
-        process_messages(Name),
-        % 2. Process injected events
-        process_injected_events(Name),
-        % 3. Process internal events (with interval, change, trigger)
-        process_internals(Name),
-        % 4. Process periodic tasks
-        process_periodics(Name),
-        % 5. Process condition monitors (level-triggered)
-        process_monitors(Name),
-        % 6. Process condition-action rules (edge-triggered)
-        process_condition_actions(Name),
-        % 7. Process present/environment events
-        process_present_events(Name),
-        % 8. Process multi-events
-        process_multi_events(Name),
-        % 9. Process past reactions (export past rules)
-        process_past_reactions(Name),
-        % 10. Check constraints
-        process_constraints(Name),
-        % 11. Process goals (with residue)
-        process_goals(Name),
-        process_residue_goals(Name),
-        % 12. Clean up expired past events
-        process_past_lifetime(Name),
-        % 13. Sleep for cycle duration
+        % Each step is wrapped with safe_step/1 so that body failure
+        % or uncaught exceptions in one step do not kill the agent loop.
+        safe_step(process_messages(Name)),
+        safe_step(process_injected_events(Name)),
+        safe_step(process_internals(Name)),
+        safe_step(process_periodics(Name)),
+        safe_step(process_monitors(Name)),
+        safe_step(process_condition_actions(Name)),
+        safe_step(process_present_events(Name)),
+        safe_step(process_multi_events(Name)),
+        safe_step(process_past_reactions(Name)),
+        safe_step(process_constraints(Name)),
+        safe_step(process_goals(Name)),
+        safe_step(process_residue_goals(Name)),
+        safe_step(process_past_lifetime(Name)),
+        % Sleep for cycle duration
         get_cycle_ms(Options, SleepMs),
         SleepSec is SleepMs / 1000,
         sleep(SleepSec),
@@ -193,6 +183,10 @@ agent_loop_inner(Name, Options) :-
     ;
         true
     ).
+
+%% safe_step(+Goal) - Run a processing step; absorb both failure and exceptions
+safe_step(Goal) :-
+    (catch(Goal, _, true) -> true ; true).
 
 %% get_cycle_ms(+Options, -Ms) - Extract cycle time from options
 get_cycle_ms(Options, Ms) :-
@@ -284,12 +278,13 @@ fire_proposal_handlers(Name, From, Action) :-
 
 %% process_injected_events(+Name) - Process events from the inject queue
 process_injected_events(Name) :-
-    findall(Ev,
-        with_mutex(blackboard_mutex,
-            retract(agent_event_queue(Name, Ev))
-        ),
-        Events),
+    collect_event_queue(Name, Events),
     process_injected_list(Name, Events).
+
+collect_event_queue(Name, [Ev|Rest]) :-
+    retract(agent_event_queue(Name, Ev)), !,
+    collect_event_queue(Name, Rest).
+collect_event_queue(_, []).
 
 process_injected_list(_, []).
 process_injected_list(Name, [Event | Rest]) :-
@@ -383,7 +378,7 @@ process_single_internal(Name, Event, Options, Body, Now) :-
     % Handle change condition (reset counter if monitored facts changed)
     process_change_condition(Name, InternalId, Options),
     (should_fire_internal(Name, InternalId, Options, Now) ->
-        catch(
+        (catch(
             (copy_term(Event-Body, _ECopy-BodyCopy),
              execute_body(Name, BodyCopy),
              increment_internal_count(Name, InternalId),
@@ -395,7 +390,7 @@ process_single_internal(Name, Event, Options, Body, Now) :-
              fire_learning(Name, Event)),
             Error,
             log_agent(Name, "Internal event error: ~w", [Error])
-        )
+        ) -> true ; true)  % Body failure is OK — condition not met
     ; true).
 
 %% process_change_condition(+Name, +Id, +Options) - Reset counter if monitored facts changed

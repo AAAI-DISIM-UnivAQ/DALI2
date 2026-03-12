@@ -59,139 +59,173 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/send" `
 
 ## 1. Smart Agriculture
 
-**File:** `examples/agriculture.pl`
+**File:** `examples/agriculture.pl` — Ported from the original DALI case study (`dalia/case_study_smart_agriculture`).
 
-A precision agriculture system with 6 agents that monitor soil, weather, and automate irrigation decisions.
+A precision agriculture system with 6 agents. Sensors validate readings via **internal events** (only abnormal readings are forwarded), the crop advisor decides actions (irrigate, reduce water, advisory), and the farmer receives notifications.
 
 ### Agents
 
 | Agent | Role |
 |-------|------|
-| `soil_sensor` | Receives soil readings, forwards to crop_advisor |
-| `weather_monitor` | Receives weather data, forwards to crop_advisor |
-| `crop_advisor` | Analyzes data, decides irrigation and alerts |
-| `irrigation_controller` | Activates irrigation on command |
-| `farmer_agent` | Receives notifications and stores them |
+| `soil_sensor` | Receives soil readings, validates via internal events (alert vs normal) |
+| `weather_monitor` | Receives weather data, validates via internal events (risk vs normal) |
+| `crop_advisor` | Analyzes reports with AI, decides: irrigate / reduce_water / advisory |
+| `irrigation_controller` | Activates irrigation or reduces water supply |
+| `farmer_agent` | Receives advisories and status updates |
 | `logger` | Logs all events centrally |
 
 ### Features Demonstrated
 
+- **Internal events** — sensors validate readings (soil_alert_check, soil_normal_check, weather_risk_check, weather_normal_check)
 - **Reactive rules** (`on`) — all agents react to incoming events
-- **Belief management** — farmer stores notifications, irrigation tracks active fields
+- **Belief management** — irrigation controller tracks active/reduced state per field
 - **Multi-agent communication** — message chains across 4+ agents
-- **AI Oracle** — crop_advisor uses AI for critical conditions (if API key configured)
-- **Conditional logic** — crop_advisor branches on moisture/pH thresholds
+- **AI Oracle** — crop_advisor uses AI for soil/weather analysis (if API key configured)
+- **Conditional logic** — crop_advisor branches on moisture/pH/temperature thresholds
 
 ### Test Commands
 
 ```bash
-# 1. Soil reading with low moisture → triggers irrigation
-curl -X POST http://localhost:8080/api/send \
+# Start
+swipl -l src/server.pl -g main -- 8080 examples/agriculture.pl
+```
+
+```bash
+# 1. Low moisture (25 < 30) → soil alert → irrigate
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"soil_sensor","content":"read_soil(25, 6.5, field_north)"}'
+  -d '{"agent":"soil_sensor","event":"read_soil(25, 6.5, north_field)"}'
 ```
 
 **Expected flow:**
 ```
-soil_sensor → crop_advisor: soil_data(25, 6.5, field_north)
-crop_advisor detects low moisture (25 < 30)
-crop_advisor → irrigation_controller: irrigate(field_north, 25)
-crop_advisor → farmer_agent: notify(low_moisture, field_north, 25)
-irrigation_controller → farmer_agent: notify(irrigation_started, field_north, 25)
+soil_sensor: stores soil_state → internal soil_alert_check fires (25 < 30)
+soil_sensor → crop_advisor: soil_report(25, 6.5, north_field)
+crop_advisor: low moisture → irrigate
+crop_advisor → irrigation_controller: irrigate(north_field)
+crop_advisor → farmer_agent: advisory(irrigate, north_field)
+irrigation_controller → farmer_agent: status(irrigating, north_field)
 ```
 
 ```bash
-# 2. Abnormal pH reading
-curl -X POST http://localhost:8080/api/send \
+# 2. High moisture (85 > 80) → reduce water
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"soil_sensor","content":"read_soil(50, 8.2, field_south)"}'
+  -d '{"agent":"soil_sensor","event":"read_soil(85, 6.5, south_field)"}'
 ```
 
-**Expected:** pH alert sent to farmer_agent (8.2 > 7.5).
+**Expected:** soil alert → crop_advisor sends `reduce_water(south_field)` to irrigation controller.
 
 ```bash
-# 3. Drought conditions (high temp + low humidity)
-curl -X POST http://localhost:8080/api/send \
+# 3. Normal soil (50, 6.8) → no action
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"weather_monitor","content":"weather_update(38, 20, sunny)"}'
+  -d '{"agent":"soil_sensor","event":"read_soil(50, 6.8, east_field)"}'
 ```
 
-**Expected:** Drought risk detected → emergency irrigation for all fields.
+**Expected:** internal soil_normal_check fires — "SOIL NORMAL" logged, no report sent.
 
 ```bash
-# 4. Frost warning
-curl -X POST http://localhost:8080/api/send \
+# 4. Drought risk (temp > 38) → emergency irrigation
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"weather_monitor","content":"weather_update(1, 80, cloudy)"}'
+  -d '{"agent":"weather_monitor","event":"weather_update(40, 15, sunny)"}'
 ```
 
-**Expected:** Frost warning sent to farmer_agent (temp < 2).
+**Expected:** weather risk → crop_advisor sends `irrigate(all_fields)` + `advisory(drought_risk)`.
 
 ```bash
-# 5. Check agent beliefs
-curl http://localhost:8080/api/beliefs?agent=farmer_agent
+# 5. Frost warning (temp < 2)
+curl -X POST http://localhost:8080/api/inject \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"weather_monitor","event":"weather_update(0, 60, clear)"}'
+```
+
+**Expected:** weather risk → `advisory(frost_warning, all_fields)` to farmer.
+
+```bash
+# 6. Check state
 curl http://localhost:8080/api/beliefs?agent=irrigation_controller
+curl http://localhost:8080/api/beliefs?agent=farmer_agent
 ```
 
 ---
 
 ## 2. Emergency Response
 
-**File:** `examples/emergency.pl`
+**File:** `examples/emergency.pl` — Ported from the original DALI emergency example (`dalia/example`).
 
-A multi-agent emergency response system with detection, coordination, evacuation, and communication.
+A 9-agent emergency response system. The sensor validates alarms via **internal events** (real vs false alarm). The coordinator uses **multi-step coordination** with internal events: it waits for equipment from the manager before dispatching the responder. The communicator notifies person agents (mary, john).
 
 ### Agents
 
 | Agent | Role |
 |-------|------|
-| `sensor` | Detects emergencies, reports to coordinator |
-| `coordinator` | Dispatches responders, tracks reports |
-| `evacuator` | Handles evacuation procedures |
-| `responder` | First response on-site |
-| `communicator` | Notifies civilians |
+| `sensor` | Detects events, validates alarms via internal events (real vs false) |
+| `coordinator` | Multi-step dispatch: AI analysis, waits for equipment, tracks done |
+| `manager` | Determines equipment (firetruck/bulldozer/respirator) based on type |
+| `evacuator` | Handles evacuation, reports back |
+| `responder` | Responds with equipment, reports back |
+| `communicator` | Notifies civilians (mary, john) |
+| `mary`, `john` | Person agents — receive evacuation messages |
 | `logger` | Logs all events |
 
 ### Features Demonstrated
 
-- **Reactive rules** — full chain from detection to response
-- **Belief management** — coordinator tracks active emergencies and reports
-- **Broadcast coordination** — coordinator dispatches to multiple agents simultaneously
+- **Internal events** — sensor: alarm validation (check_alarm, check_false_alarm); coordinator: dispatch_response (waits for equipment + location), check_done (waits for evacuated + responded)
+- **Reactive rules** — full chain from detection to resolution
+- **Belief management** — coordinator tracks pending_location, equipment_ready, evacuated, responded
+- **Multi-step coordination** — responder is only dispatched after manager provides equipment
+- **AI Oracle** — coordinator analyzes emergency (if API key configured)
 
 ### Test Commands
 
 ```bash
-# 1. Fire emergency
-curl -X POST http://localhost:8080/api/send \
+# Start
+swipl -l src/server.pl -g main -- 8080 examples/emergency.pl
+```
+
+```bash
+# 1. Fire emergency — full multi-step flow
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"sense(fire, building_a)"}'
+  -d '{"agent":"sensor","event":"sense(fire, building_a)"}'
 ```
 
 **Expected flow:**
 ```
+sensor: stores detected(fire, building_a) → internal check_alarm fires (fire ∈ alarm list)
 sensor → coordinator: alarm(fire, building_a)
-coordinator → evacuator: evacuate(building_a, fire)
-coordinator → communicator: notify_civilians(building_a, fire)
-coordinator → responder: respond(building_a, fire)
-evacuator → coordinator: report(evacuator, evacuation_complete, building_a)
-responder → coordinator: report(responder, response_active, building_a)
+coordinator → evacuator + communicator + manager (dispatches all three)
+manager: fire → firetruck → coordinator: equipped(firetruck)
+communicator → mary + john: message(fire, building_a)
+evacuator → coordinator: evacuated(building_a)
+coordinator internal dispatch_response: location + equipment ready → responder: respond(firetruck, building_a)
+responder → coordinator: responded(building_a)
+coordinator internal check_done: evacuated + responded → "EMERGENCY RESOLVED"
 ```
 
 ```bash
-# 2. Earthquake emergency
-curl -X POST http://localhost:8080/api/send \
+# 2. False alarm — wind is not in [smoke, fire, earthquake]
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"sense(earthquake, downtown)"}'
+  -d '{"agent":"sensor","event":"sense(wind, park)"}'
+```
 
-# 3. Chemical spill
-curl -X POST http://localhost:8080/api/send \
+**Expected:** internal check_false_alarm fires — "FALSE ALARM: wind at park". No alarm sent to coordinator.
+
+```bash
+# 3. Earthquake (different equipment)
+curl -X POST http://localhost:8080/api/inject \
   -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"sense(chemical_spill, factory_zone)"}'
+  -d '{"agent":"sensor","event":"sense(earthquake, downtown)"}'
+```
 
-# 4. Check coordinator beliefs (active emergencies + reports)
+**Expected:** manager selects bulldozer, same multi-step flow as fire.
+
+```bash
+# 4. Check state
 curl http://localhost:8080/api/beliefs?agent=coordinator
-
-# 5. Check past events
 curl http://localhost:8080/api/past?agent=coordinator
 ```
 
