@@ -44,18 +44,26 @@ After starting, open **http://localhost:8080** for the web UI.
 
 ### Sending Events
 
-All examples use the REST API to inject events. Use `curl` (Linux/Mac) or `Invoke-RestMethod` (PowerShell):
+All examples use the REST API to inject events.
+
+**PowerShell (Windows):**
+
+```powershell
+# Send to a specific agent
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""agent_name"",""content"":""event(args)""}"
+
+# Inject directly into an agent's event queue
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""agent_name"",""event"":""event(args)""}"
+```
+
+> **Note:** On Windows, use `curl.exe` (not `curl`, which is a PowerShell alias). Use `""` to escape double quotes inside double-quoted strings.
+
+**bash (Linux/Mac):**
 
 ```bash
-# curl (Linux/Mac)
 curl -X POST http://localhost:8080/api/send \
   -H "Content-Type: application/json" \
   -d '{"to":"agent_name","content":"event(args)"}'
-
-# PowerShell (Windows)
-Invoke-RestMethod -Uri "http://localhost:8080/api/send" `
-  -Method Post -ContentType "application/json" `
-  -Body '{"to":"agent_name","content":"event(args)"}'
 ```
 
 ---
@@ -93,11 +101,9 @@ A precision agriculture system with 6 agents. Sensors validate readings via **in
 swipl -l src/server.pl -g main -- 8080 examples/agriculture.pl
 ```
 
-```bash
+```powershell
 # 1. Low moisture (25 < 30) → soil alert → irrigate
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"soil_sensor","event":"read_soil(25, 6.5, north_field)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""soil_sensor"",""event"":""read_soil(25, 6.5, north_field)""}"
 ```
 
 **Expected flow:**
@@ -110,46 +116,38 @@ crop_advisor → farmer_agent: advisory(irrigate, north_field)
 irrigation_controller → farmer_agent: status(irrigating, north_field)
 ```
 
-```bash
+```powershell
 # 2. High moisture (85 > 80) → reduce water
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"soil_sensor","event":"read_soil(85, 6.5, south_field)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""soil_sensor"",""event"":""read_soil(85, 6.5, south_field)""}"
 ```
 
 **Expected:** soil alert → crop_advisor sends `reduce_water(south_field)` to irrigation controller.
 
-```bash
+```powershell
 # 3. Normal soil (50, 6.8) → no action
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"soil_sensor","event":"read_soil(50, 6.8, east_field)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""soil_sensor"",""event"":""read_soil(50, 6.8, east_field)""}"
 ```
 
 **Expected:** internal soil_normal_check fires — "SOIL NORMAL" logged, no report sent.
 
-```bash
+```powershell
 # 4. Drought risk (temp > 38) → emergency irrigation
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"weather_monitor","event":"weather_update(40, 15, sunny)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""weather_monitor"",""event"":""weather_update(40, 15, sunny)""}"
 ```
 
 **Expected:** weather risk → crop_advisor sends `irrigate(all_fields)` + `advisory(drought_risk)`.
 
-```bash
+```powershell
 # 5. Frost warning (temp < 2)
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"weather_monitor","event":"weather_update(0, 60, clear)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""weather_monitor"",""event"":""weather_update(0, 60, clear)""}"
 ```
 
 **Expected:** weather risk → `advisory(frost_warning, all_fields)` to farmer.
 
-```bash
+```powershell
 # 6. Check state
-curl http://localhost:8080/api/beliefs?agent=irrigation_controller
-curl http://localhost:8080/api/beliefs?agent=farmer_agent
+curl.exe http://localhost:8080/api/beliefs?agent=irrigation_controller
+curl.exe http://localhost:8080/api/beliefs?agent=farmer_agent
 ```
 
 ---
@@ -188,11 +186,9 @@ A 9-agent emergency response system. The sensor validates alarms via **internal 
 swipl -l src/server.pl -g main -- 8080 examples/emergency.pl
 ```
 
-```bash
+```powershell
 # 1. Fire emergency — full multi-step flow
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"sensor","event":"sense(fire, building_a)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""sensor"",""event"":""sense(fire, building_a)""}"
 ```
 
 **Expected flow:**
@@ -208,28 +204,24 @@ responder → coordinator: responded(building_a)
 coordinator internal check_done: evacuated + responded → "EMERGENCY RESOLVED"
 ```
 
-```bash
+```powershell
 # 2. False alarm — wind is not in [smoke, fire, earthquake]
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"sensor","event":"sense(wind, park)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""sensor"",""event"":""sense(wind, park)""}"
 ```
 
 **Expected:** internal check_false_alarm fires — "FALSE ALARM: wind at park". No alarm sent to coordinator.
 
-```bash
+```powershell
 # 3. Earthquake (different equipment)
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"sensor","event":"sense(earthquake, downtown)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""sensor"",""event"":""sense(earthquake, downtown)""}"
 ```
 
 **Expected:** manager selects bulldozer, same multi-step flow as fire.
 
-```bash
+```powershell
 # 4. Check state
-curl http://localhost:8080/api/beliefs?agent=coordinator
-curl http://localhost:8080/api/past?agent=coordinator
+curl.exe http://localhost:8080/api/beliefs?agent=coordinator
+curl.exe http://localhost:8080/api/past?agent=coordinator
 ```
 
 ---
@@ -301,13 +293,11 @@ swipl -l src/server.pl -g main -- 8080 examples/showcase.pl
 - logger: loads `test_ontology.pl` (external ontology)
 - After ~4 seconds: sensor calibration achieved
 
-```bash
+```powershell
 # STEP 1: Send first temperature reading
 # Triggers: learning, blackboard, present event, on_change, triggered internal,
 #           constraint, export past (on_past), change condition reset, priority queue
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"read_temp(85)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(85)""}"
 ```
 
 **Expected:**
@@ -321,11 +311,9 @@ curl -X POST http://localhost:8080/api/send \
 - **Priority queue**: coordinator processes `emergency(200)` before `sensor_data(30)`
 - Logger receives log_event → **ontology** matching works
 
-```bash
+```powershell
 # STEP 2: Send second reading (triggers learned pattern + multi-event + export past)
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"read_temp(90)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(90)""}"
 ```
 
 **Expected:**
@@ -333,92 +321,74 @@ curl -X POST http://localhost:8080/api/send \
 - **Multi-event**: `sensor_data` + `alert` both in past → fires
 - **Export past (on_past)**: `alert` + `sensor_data` consumed from past memory
 
-```bash
+```powershell
 # STEP 3: Test FIPA confirm — coordinator sends confirm to worker
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"send_confirm(system_ok)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""send_confirm(system_ok)""}"
 ```
 
 **Expected:** Worker receives `confirm(system_ok)` → "Fact confirmed: system_ok" + "FIPA CONFIRM received"
 
-```bash
+```powershell
 # STEP 4: Test FIPA query_ref — coordinator queries worker's beliefs
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"query_worker(status(_))"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""query_worker(status(_))""}"
 ```
 
 **Expected:** Worker auto-responds with `inform(query_ref(status(_)), values([status(ready)]))` → coordinator logs "FIPA QUERY_REF response"
 
-```bash
+```powershell
 # STEP 5: Test FIPA proposals — coordinator proposes to worker
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"request_analysis(sample_data)}"'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""request_analysis(sample_data)""}"
 ```
 
 **Expected:** Worker accepts → executes `analyze(sample_data)` → sends `inform(analysis_result, complete)` back → coordinator logs "FIPA PROPOSAL ACCEPTED"
 
-```bash
+```powershell
 # STEP 6: Test rejected proposal
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"test_reject"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""test_reject""}"
 ```
 
 **Expected:** Worker rejects `impossible_task` → coordinator logs "FIPA PROPOSAL REJECTED"
 
-```bash
+```powershell
 # STEP 7: Test export past not_done
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"critical_data(important_backup)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""critical_data(important_backup)""}"
 ```
 
 **Expected:** "EXPORT PAST NOT_DONE: backup NOT done! critical_data(important_backup) needs attention!"
 
-```bash
+```powershell
 # STEP 8: Test residue goals
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"start_residue_test"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""start_residue_test""}"
 # Wait 2 seconds, then inject the resolution:
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"coordinator","event":"residue_resolved"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""coordinator"",""event"":""residue_resolved""}"
 ```
 
 **Expected:** "Goal queued as residue: has_past(residue_resolved)" → then "Residue goal achieved" after injection
 
-```bash
+```powershell
 # STEP 9: Test tell/told filtering — send an unaccepted message
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"coordinator","content":"unknown_message(test)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""coordinator"",""content"":""unknown_message(test)""}"
 ```
 
 **Expected:** Message rejected by told rule (coordinator only accepts defined patterns)
 
-```bash
+```powershell
 # STEP 10: Lower temperature — constraint resolves, change condition resets diagnostic
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"thermostat","content":"update_temp(20)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""thermostat"",""content"":""update_temp(20)""}"
 ```
 
 **Expected:** Temperature drops to 20, constraint no longer violated, mode goes to idle, `startup_diagnostic` counter resets (change detected)
 
-```bash
+```powershell
 # STEP 11: Check all state via APIs
-curl http://localhost:8080/api/agents
-curl http://localhost:8080/api/beliefs?agent=thermostat
-curl http://localhost:8080/api/beliefs?agent=coordinator
-curl http://localhost:8080/api/beliefs?agent=worker
-curl http://localhost:8080/api/past?agent=coordinator
-curl http://localhost:8080/api/learned?agent=sensor
-curl http://localhost:8080/api/goals?agent=sensor
-curl http://localhost:8080/api/blackboard
+curl.exe http://localhost:8080/api/agents
+curl.exe http://localhost:8080/api/beliefs?agent=thermostat
+curl.exe http://localhost:8080/api/beliefs?agent=coordinator
+curl.exe http://localhost:8080/api/beliefs?agent=worker
+curl.exe http://localhost:8080/api/past?agent=coordinator
+curl.exe http://localhost:8080/api/learned?agent=sensor
+curl.exe http://localhost:8080/api/goals?agent=sensor
+curl.exe http://localhost:8080/api/blackboard
 ```
 
 ---
@@ -492,28 +462,22 @@ swipl -l src/server.pl -g main -- 8081 examples/emergency_responders.pl
 ```
 
 **Register peers:**
-```bash
+```powershell
 # Tell node 1 about node 2
-curl -X POST http://localhost:8080/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"responders","url":"http://localhost:8081"}'
+curl.exe -X POST http://localhost:8080/api/peers/register -H "Content-Type: application/json" -d "{""name"":""responders"",""url"":""http://localhost:8081""}"
 
 # Tell node 2 about node 1
-curl -X POST http://localhost:8081/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"sensors","url":"http://localhost:8080"}'
+curl.exe -X POST http://localhost:8081/api/peers/register -H "Content-Type: application/json" -d "{""name"":""sensors"",""url"":""http://localhost:8080""}"
 
 # Sync agent lists
-curl -X POST http://localhost:8080/api/peers/sync
-curl -X POST http://localhost:8081/api/peers/sync
+curl.exe -X POST http://localhost:8080/api/peers/sync
+curl.exe -X POST http://localhost:8081/api/peers/sync
 ```
 
 **Test:**
-```bash
+```powershell
 # Send emergency to sensor on node 1
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"sensor","content":"detect(fire, building_a)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""detect(fire, building_a)""}"
 ```
 
 **Expected:** sensor on node 1 sends alarm to coordinator on node 2 via federation. Coordinator dispatches to evacuator, responder, communicator (all on node 2). Logger messages go back to node 1.
@@ -524,50 +488,46 @@ curl -X POST http://localhost:8080/api/send \
 
 ### Sending Events
 
-```bash
+```powershell
 # Send to a specific agent
-curl -X POST http://localhost:8080/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"AGENT","content":"EVENT(ARGS)"}'
+curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""AGENT"",""content"":""EVENT(ARGS)""}"
 
 # Inject directly into an agent's event queue
-curl -X POST http://localhost:8080/api/inject \
-  -H "Content-Type: application/json" \
-  -d '{"agent":"AGENT","event":"EVENT(ARGS)"}'
+curl.exe -X POST http://localhost:8080/api/inject -H "Content-Type: application/json" -d "{""agent"":""AGENT"",""event"":""EVENT(ARGS)""}"
 ```
 
 ### Querying State
 
-```bash
+```powershell
 # List all agents
-curl http://localhost:8080/api/agents
+curl.exe http://localhost:8080/api/agents
 
 # Agent beliefs
-curl http://localhost:8080/api/beliefs?agent=AGENT
+curl.exe http://localhost:8080/api/beliefs?agent=AGENT
 
 # Past events
-curl http://localhost:8080/api/past?agent=AGENT
+curl.exe http://localhost:8080/api/past?agent=AGENT
 
 # Learned patterns
-curl http://localhost:8080/api/learned?agent=AGENT
+curl.exe http://localhost:8080/api/learned?agent=AGENT
 
 # Goal statuses
-curl http://localhost:8080/api/goals?agent=AGENT
+curl.exe http://localhost:8080/api/goals?agent=AGENT
 
 # Blackboard contents
-curl http://localhost:8080/api/blackboard
+curl.exe http://localhost:8080/api/blackboard
 
 # System logs
-curl http://localhost:8080/api/logs?agent=AGENT
+curl.exe http://localhost:8080/api/logs?agent=AGENT
 ```
 
 ### Agent Control
 
-```bash
+```powershell
 # Start/stop individual agents
-curl -X POST http://localhost:8080/api/start -H "Content-Type: application/json" -d '{"agent":"AGENT"}'
-curl -X POST http://localhost:8080/api/stop -H "Content-Type: application/json" -d '{"agent":"AGENT"}'
+curl.exe -X POST http://localhost:8080/api/start -H "Content-Type: application/json" -d "{""agent"":""AGENT""}"
+curl.exe -X POST http://localhost:8080/api/stop -H "Content-Type: application/json" -d "{""agent"":""AGENT""}"
 
 # Reload agent file
-curl -X POST http://localhost:8080/api/reload -H "Content-Type: application/json" -d '{"file":"examples/showcase.pl"}'
+curl.exe -X POST http://localhost:8080/api/reload -H "Content-Type: application/json" -d "{""file"":""examples/showcase.pl""}"
 ```

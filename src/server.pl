@@ -80,6 +80,8 @@ main :-
     federation:fed_init(NodeName),
     %% Initialize Redis connection (master also connects for inject/send from web UI)
     catch(redis_comm:redis_init, _, format("WARNING: Redis not available~n")),
+    %% Subscribe to LOGS channel so agent log entries appear in the web UI
+    catch(redis_comm:redis_subscribe_logs, _, true),
     %% Set agent file for engine process management
     format(atom(MasterUrl), "http://localhost:~w", [Port]),
     engine:set_master_url(MasterUrl),
@@ -307,6 +309,7 @@ api_send(Request) :-
                  communication:send(user, To, Content)
              )
          ),
+         engine:log_agent(To, "Message sent from web UI: ~w", [Content]),
          reply_json_dict(_{ok: true, message: "Message sent"})
         ),
         Error,

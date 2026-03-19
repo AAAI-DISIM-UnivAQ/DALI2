@@ -31,7 +31,9 @@
     agent_beliefs/2,
     agent_learned/2,
     agent_goals/2,
-    all_logs/1
+    all_logs/1,
+    log_agent/2,
+    log_agent/3
 ]).
 
 :- use_module(blackboard).
@@ -95,9 +97,9 @@ start_agent(Name) :-
     (agent_running(Name) ->
         log_agent(Name, "Agent already running")
     ;
-        loader:agent_def(Name, _Options),
+        loader:agent_def(Name, Options),
         assert(agent_running(Name)),
-        bb_register_agent(Name, _Options),
+        bb_register_agent(Name, Options),
         get_agent_file(AgentFile),
         %% Spawn separate swipl process — only needs agent name and file
         process_create(
@@ -105,7 +107,7 @@ start_agent(Name) :-
             ['-l', 'src/agent_process.pl', '-g', 'agent_main', '-t', 'halt',
              '--', Name, AgentFile],
             [process(Pid), detached(true),
-             stdout(pipe(_StdOut)), stderr(pipe(_StdErr))]
+             stdout(pipe(_StdOut)), stderr(std)]
         ),
         assert(agent_process_pid(Name, Pid)),
         log_agent(Name, "Agent process started (PID: ~w, Redis)", [Pid])

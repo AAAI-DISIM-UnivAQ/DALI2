@@ -29,6 +29,7 @@
     redis_init/0,
     redis_init/2,
     redis_subscribe_linda/1,     % redis_subscribe_linda(+AgentName)
+    redis_subscribe_logs/0,      % redis_subscribe_logs — master subscribes to LOGS channel
     redis_publish_linda/3,       % redis_publish_linda(+From, +To, +Content)
     redis_publish_log/2,         % redis_publish_log(+AgentName, +Message)
     redis_poll_messages/2,       % redis_poll_messages(+AgentName, -Messages)
@@ -41,6 +42,7 @@
 
 :- use_module(library(redis)).
 :- use_module(library(lists)).
+:- use_module(library(broadcast)).
 
 :- dynamic redis_connection/1.       % redis_connection(Connection)
 :- dynamic redis_sub_connection/1.   % redis_sub_connection(SubConnection)
@@ -96,31 +98,27 @@ redis_publish_linda(From, To, Content) :-
     ).
 
 %% redis_subscribe_linda(+AgentName)
-%% Starts a background thread that subscribes to LINDA and buffers
-%% messages addressed to this agent (or broadcast *).
+%% Subscribes to the LINDA channel using listen/2 (broadcast library)
+%% and redis_subscribe/4 with options list. Buffers messages for this agent.
 redis_subscribe_linda(AgentName) :-
     (redis_is_connected ->
-        thread_create(linda_subscriber_loop(AgentName), _,
-            [detached(true), alias(redis_linda_sub)])
+        %% Register broadcast listener for LINDA channel messages
+        listen(redis(_, 'LINDA', Message),
+            redis_comm:handle_linda_message(AgentName, Message)),
+        %% Start subscription (creates background thread internally)
+        catch(
+            redis_subscribe(dali2_redis, ['LINDA'], _SubId, []),
+            Error,
+            format(user_error, "[Redis] Subscribe error: ~w~n", [Error])
+        )
     ;
         format(user_error, "[Redis] Not connected, cannot subscribe~n", [])
     ).
 
-linda_subscriber_loop(AgentName) :-
-    catch(
-        redis_subscribe(dali2_redis, ['LINDA'], _SubId,
-            redis_comm:linda_callback(AgentName)),
-        Error,
-        (format(user_error, "[Redis] Subscribe error: ~w, retrying...~n", [Error]),
-         sleep(2),
-         linda_subscriber_loop(AgentName))
-    ).
-
-%% linda_callback(+AgentName, +Channel, +Message)
-%% Called for each message on the LINDA channel.
+%% handle_linda_message(+AgentName, +Message)
+%% Called via broadcast for each message on the LINDA channel.
 %% Parses "TO:CONTENT:FROM" and queues if addressed to us or broadcast.
-:- meta_predicate linda_callback(+, +, +).
-linda_callback(AgentName, 'LINDA', Message) :-
+handle_linda_message(AgentName, Message) :-
     atom_string(MsgAtom, Message),
     parse_linda_message(MsgAtom, To, ContentAtom, From),
     (To == AgentName ; To == '*' ; To == all),
@@ -130,7 +128,7 @@ linda_callback(AgentName, 'LINDA', Message) :-
     with_mutex(redis_queue_mutex,
         assert(redis_msg_queue(AgentName, Content, From))
     ).
-linda_callback(_, _, _).  % ignore messages not for us
+handle_linda_message(_, _).  % ignore messages not for us
 
 %% parse_linda_message(+Msg, -To, -Content, -From)
 %% Parses "TO:CONTENT:FROM" — splits on first and last colon.
@@ -181,6 +179,43 @@ redis_publish_log(AgentName, Message) :-
         )
     ;
         true
+    ).
+
+%% redis_subscribe_logs/0
+%% Master server subscribes to LOGS channel to collect agent log entries
+%% for the web UI. Parses "AGENT:MESSAGE" and asserts engine:agent_log_entry/3.
+redis_subscribe_logs :-
+    (redis_is_connected ->
+        %% Register broadcast listener for LOGS channel messages
+        listen(redis(_, 'LOGS', Message),
+            redis_comm:handle_logs_message(Message)),
+        %% Start subscription (creates background thread internally)
+        catch(
+            redis_subscribe(dali2_redis, ['LOGS'], _SubId, []),
+            Error,
+            format(user_error, "[Redis] LOGS subscribe error: ~w~n", [Error])
+        )
+    ;
+        format(user_error, "[Redis] Not connected, cannot subscribe to LOGS~n", [])
+    ).
+
+%% handle_logs_message(+Message)
+%% Called via broadcast for each message on the LOGS channel.
+%% Parses "AGENT:MESSAGE" and asserts to engine:agent_log_entry/3.
+handle_logs_message(Message) :-
+    atom_string(MsgAtom, Message),
+    atom_string(MsgAtom, Str),
+    %% Find first ':' to split AGENT:MESSAGE
+    (sub_string(Str, Before, 1, _, ":") ->
+        sub_string(Str, 0, Before, _, AgentStr),
+        After is Before + 1,
+        sub_string(Str, After, _, 0, MsgStr),
+        atom_string(Agent, AgentStr),
+        atom_string(MsgText, MsgStr),
+        get_time(Stamp), T is truncate(Stamp * 1000),
+        assert(engine:agent_log_entry(Agent, T, MsgText))
+    ;
+        true  % malformed message, ignore
     ).
 
 %% ============================================================
