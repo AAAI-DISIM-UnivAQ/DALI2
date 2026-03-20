@@ -66,15 +66,8 @@ const postAiAsk = (context) => api('/api/ai/ask', {
     method: 'POST', body: JSON.stringify({ context })
 });
 
-// Federation API
-const getPeers = () => api('/api/peers');
-const postPeerRegister = (name, url) => api('/api/peers/register', {
-    method: 'POST', body: JSON.stringify({ name, url })
-});
-const postPeerUnregister = (name) => api('/api/peers/unregister', {
-    method: 'POST', body: JSON.stringify({ name })
-});
-const postPeerSync = () => api('/api/peers/sync', { method: 'POST' });
+// Cluster API (Redis-based agent registry)
+const getCluster = () => api('/api/cluster');
 
 // ============================================================
 // UI Updates
@@ -91,8 +84,9 @@ function updateStatus(data) {
     const nodeLabel = document.getElementById('node-name');
     if (data) {
         dot.className = 'status-dot connected';
-        const peerInfo = data.peers > 0 ? ` | ${data.peers} peer${data.peers !== 1 ? 's' : ''}` : '';
-        text.textContent = `${data.agents} agent${data.agents !== 1 ? 's' : ''} active${peerInfo}`;
+        const redisInfo = data.redis ? ' | Redis' : ' | no Redis';
+        const clusterInfo = data.cluster_agents > data.agents ? ` | ${data.cluster_agents} in cluster` : '';
+        text.textContent = `${data.agents} agent${data.agents !== 1 ? 's' : ''} active${redisInfo}${clusterInfo}`;
         if (data.node) nodeLabel.textContent = data.node;
     } else {
         dot.className = 'status-dot error';
@@ -359,19 +353,6 @@ function init() {
         poll();
     });
 
-    // --- Federation / Peers ---
-    document.getElementById('btn-add-peer').addEventListener('click', async () => {
-        const name = document.getElementById('peer-name').value.trim();
-        const url = document.getElementById('peer-url').value.trim();
-        if (!name || !url) return;
-        const res = await postPeerRegister(name, url);
-        if (res && res.ok) {
-            document.getElementById('peer-name').value = '';
-            document.getElementById('peer-url').value = '';
-            updatePeers();
-        }
-    });
-
     // --- AI Oracle ---
     document.getElementById('btn-set-key').addEventListener('click', async () => {
         const key = document.getElementById('ai-key-input').value.trim();
@@ -431,9 +412,9 @@ function init() {
     updateAiStatus();
     setInterval(updateAiStatus, 10000);
 
-    // Federation peers
-    updatePeers();
-    setInterval(updatePeers, 5000);
+    // Cluster status (Redis agent registry)
+    updateCluster();
+    setInterval(updateCluster, 5000);
 }
 
 async function updateAiStatus() {
@@ -457,49 +438,41 @@ async function updateAiStatus() {
     }
 }
 
-async function updatePeers() {
-    const data = await getPeers();
-    const list = document.getElementById('peers-list');
-    const countEl = document.getElementById('peer-count');
-    const remoteSection = document.getElementById('remote-agents-section');
-    const remoteList = document.getElementById('remote-agents-list');
-    list.innerHTML = '';
-    if (!data || !data.peers) return;
-    countEl.textContent = `(${data.peers.length})`;
-    data.peers.forEach(p => {
-        const div = document.createElement('div');
-        div.className = 'peer-item';
-        const agentCount = p.agents ? p.agents.length : 0;
-        div.innerHTML = `
-            <span class="peer-dot"></span>
-            <span class="peer-name">${p.name}</span>
-            <span class="peer-agents">${agentCount} agents</span>
-            <button class="btn-peer-remove" title="Disconnect">&times;</button>
-        `;
-        div.querySelector('.btn-peer-remove').onclick = async () => {
-            await postPeerUnregister(p.name);
-            updatePeers();
-        };
-        list.appendChild(div);
-    });
-    // Show remote agents
-    const allRemote = data.peers.flatMap(p => (p.agents || []).map(a => ({name: a, peer: p.name})));
-    if (allRemote.length > 0) {
-        remoteSection.style.display = 'block';
-        remoteList.innerHTML = '';
-        allRemote.forEach(ra => {
-            const item = document.createElement('div');
-            item.className = 'agent-item remote';
-            item.innerHTML = `
-                <span class="agent-dot remote"></span>
-                <span class="agent-name">${ra.name}</span>
-                <span class="agent-cycle">@${ra.peer}</span>
-            `;
-            remoteList.appendChild(item);
-        });
-    } else {
-        remoteSection.style.display = 'none';
+async function updateCluster() {
+    const data = await getCluster();
+    const statusEl = document.getElementById('cluster-status');
+    const nodesEl = document.getElementById('cluster-nodes');
+    const countEl = document.getElementById('cluster-count');
+    if (!data) {
+        statusEl.innerHTML = '<span class="cluster-offline">Redis not connected</span>';
+        nodesEl.innerHTML = '';
+        countEl.textContent = '';
+        return;
     }
+    statusEl.innerHTML = data.redis
+        ? '<span class="cluster-online">Redis connected</span>'
+        : '<span class="cluster-offline">Redis not connected</span>';
+    const nodes = data.nodes || [];
+    const totalAgents = nodes.reduce((s, n) => s + (n.agents ? n.agents.length : 0), 0);
+    countEl.textContent = nodes.length > 1 ? `(${nodes.length} nodes, ${totalAgents} agents)` : '';
+    nodesEl.innerHTML = '';
+    nodes.forEach(n => {
+        const isMe = n.node === data.node;
+        const div = document.createElement('div');
+        div.className = 'cluster-node' + (isMe ? ' cluster-node-self' : '');
+        const agentList = (n.agents || []).map(a =>
+            `<span class="cluster-agent">${a}</span>`
+        ).join('');
+        div.innerHTML = `
+            <div class="cluster-node-header">
+                <span class="cluster-node-dot"></span>
+                <span class="cluster-node-name">${n.node}</span>
+                ${isMe ? '<span class="cluster-node-badge">this</span>' : ''}
+            </div>
+            <div class="cluster-agent-list">${agentList || '<em>no agents</em>'}</div>
+        `;
+        nodesEl.appendChild(div);
+    });
 }
 
 document.addEventListener('DOMContentLoaded', init);

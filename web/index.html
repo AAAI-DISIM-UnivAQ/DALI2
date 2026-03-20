@@ -23,22 +23,14 @@
     </header>
 
     <main>
-        <!-- Left panel: Agents + Peers -->
+        <!-- Left panel: Agents + Cluster -->
         <aside id="agents-panel">
             <h2>Local Agents</h2>
             <div id="agents-list"></div>
-            <div id="remote-agents-section" style="display:none">
-                <h2>Remote Agents</h2>
-                <div id="remote-agents-list"></div>
-            </div>
-            <div class="peers-section">
-                <h2>Federation <span class="count" id="peer-count">(0)</span></h2>
-                <div id="peers-list"></div>
-                <div class="peer-add">
-                    <input type="text" id="peer-name" placeholder="node name" spellcheck="false">
-                    <input type="text" id="peer-url" placeholder="http://host:port" spellcheck="false">
-                    <button id="btn-add-peer" class="btn btn-small">Connect</button>
-                </div>
+            <div id="cluster-section">
+                <h2>Cluster <span class="count" id="cluster-count"></span></h2>
+                <div id="cluster-status" class="cluster-status"></div>
+                <div id="cluster-nodes"></div>
             </div>
         </aside>
 

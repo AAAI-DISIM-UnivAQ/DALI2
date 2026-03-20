@@ -19,7 +19,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo Modes:
 echo   1. Single instance (all agents on one node)
-echo   2. Distributed (multi-node federation)
+echo   2. Distributed (multi-node, shared Redis)
 echo.
 set /p "MODE=Choose mode [1]: "
 if "!MODE!"=="" set "MODE=1"

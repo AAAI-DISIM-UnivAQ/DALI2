@@ -25,7 +25,6 @@ user:message_hook(_, informational, _) :- !.
 :- use_module(loader).
 :- use_module(engine).
 :- use_module(ai_oracle).
-:- use_module(federation).
 :- use_module(redis_comm).
 
 %% HTTP Routes
@@ -49,13 +48,8 @@ user:message_hook(_, informational, _) :- !.
 :- http_handler(root(api/ai/key),    api_ai_key,    [method(post)]).
 :- http_handler(root(api/ai/ask),    api_ai_ask,    [method(post)]).
 :- http_handler(root(api/ai/model),  api_ai_model,  [method(post)]).
-%% Federation / Distributed
-:- http_handler(root(api/peers),          api_peers,          []).
-:- http_handler(root(api/peers/register),  api_peer_register, [method(post)]).
-:- http_handler(root(api/peers/unregister),api_peer_unregister,[method(post)]).
-:- http_handler(root(api/peers/sync),      api_peer_sync,     [method(post)]).
-:- http_handler(root(api/remote/agents),   api_remote_agents,  []).
-:- http_handler(root(api/remote/receive),  api_remote_receive, [method(post)]).
+%% Cluster (Redis-based agent registry)
+:- http_handler(root(api/cluster),  api_cluster,  []).
 :- http_handler(root(static),  serve_static, [prefix]).
 
 %% ============================================================
@@ -69,7 +63,10 @@ main :-
     format("~n=== DALI2 Multi-Agent System ===~n"),
     format("Node: ~w | Port: ~w~n", [NodeName, Port]),
     bb_init,
-    federation:fed_init(NodeName),
+    %% Store node name for Redis agent registry
+    retractall(node_name_setting(_)),
+    assert(node_name_setting(NodeName)),
+    engine:set_node_name(NodeName),
     %% Initialize Redis connection (master also connects for inject/send from web UI)
     catch(redis_comm:redis_init, _, format("WARNING: Redis not available~n")),
     %% Subscribe to LOGS channel so agent log entries appear in the web UI
@@ -81,7 +78,7 @@ main :-
         findall(N, loader:agent_def(N, _), AllNames),
         format("Agents defined: ~w~n", [AllNames]),
         assert(current_agent_file(AgentFile)),
-        %% Start HTTP server BEFORE starting agents (agents need to register)
+        %% Start HTTP server BEFORE starting agents
         http_server(http_dispatch, [port(Port)]),
         format("Server started, launching agent processes...~n"),
         %% Start only filtered agents, or all if no filter
@@ -100,17 +97,13 @@ main :-
     %% Handle SIGINT/SIGTERM for clean shutdown (e.g. CTRL+C in Docker)
     on_signal(int, _, signal_stop),
     on_signal(term, _, signal_stop),
-    %% Set own URL (for peer registration handshakes)
-    format(atom(SelfUrl), "http://localhost:~w", [Port]),
-    federation:fed_set_url(SelfUrl),
-    %% Auto-connect to peers from DALI2_PEERS env var (comma-separated name@url)
-    auto_connect_peers,
     thread_get_message(stop_server).
 
 signal_stop(_Signal) :-
     thread_send_message(main, stop_server).
 
 :- dynamic current_agent_file/1.
+:- dynamic node_name_setting/1.
 
 %% parse_args(+Argv, -Port, -AgentFile, -NodeName, -AgentFilter)
 parse_args(Argv, Port, AgentFile, NodeName, AgentFilter) :-
@@ -132,47 +125,6 @@ parse_args(Argv, Port, AgentFile, NodeName, AgentFilter) :-
 
 parse_flag([Flag, Value | _], Flag, Value) :- !.
 parse_flag([_ | Rest], Flag, Value) :- parse_flag(Rest, Flag, Value).
-
-%% auto_connect_peers/0 - Connect to peers listed in DALI2_PEERS env var
-%%   Format: name1@http://host1:port1,name2@http://host2:port2
-%%   Starts a background thread that retries sync for peers that aren't ready yet.
-auto_connect_peers :-
-    (getenv('DALI2_PEERS', PeersStr), PeersStr \= '' ->
-        atomic_list_concat(PeerSpecs, ',', PeersStr),
-        forall(member(Spec, PeerSpecs), connect_peer_spec(Spec)),
-        %% Start background retry for unsynced peers
-        thread_create(peer_sync_retry_loop, _, [detached(true)])
-    ; true).
-
-connect_peer_spec(Spec) :-
-    (sub_atom(Spec, Before, 1, _, '@') ->
-        sub_atom(Spec, 0, Before, _, Name),
-        After is Before + 1,
-        sub_atom(Spec, After, _, 0, Url),
-        format("Connecting to peer: ~w at ~w~n", [Name, Url]),
-        catch(federation:fed_register_peer(Name, Url), E,
-            format(user_error, "Failed to connect to ~w: ~w~n", [Name, E]))
-    ;
-        format(user_error, "Invalid peer spec (expected name@url): ~w~n", [Spec])
-    ).
-
-%% peer_sync_retry_loop/0 - Retry syncing with peers that have empty agent lists
-peer_sync_retry_loop :-
-    peer_sync_retry_loop(10).   % Up to 10 retries
-
-peer_sync_retry_loop(0) :- !.
-peer_sync_retry_loop(N) :-
-    sleep(3),
-    findall(Name, (federation:peer(Name, _, Agents), Agents == []), Unsynced),
-    (Unsynced == [] ->
-        format(user_error, "[Federation] All peers synced~n", [])
-    ;
-        format(user_error, "[Federation] Retrying sync for: ~w~n", [Unsynced]),
-        forall(member(P, Unsynced),
-            catch(federation:fed_sync_peer(P), _, true)),
-        N1 is N - 1,
-        peer_sync_retry_loop(N1)
-    ).
 
 %% ============================================================
 %% STATIC FILE SERVING
@@ -225,12 +177,14 @@ api_status(_Request) :-
     (current_agent_file(F) -> File = F ; File = ''),
     (ai_oracle:ai_available -> AI = true ; AI = false),
     (ai_oracle:ai_model(Model) -> true ; Model = 'none'),
-    federation:fed_node_name(NodeName),
-    federation:fed_peers(Peers),
-    length(Peers, PeerCount),
+    (node_name_setting(NodeName) -> true ; NodeName = standalone),
+    (redis_comm:redis_connected -> Redis = true ; Redis = false),
+    redis_comm:redis_registered_agents(AllAgents),
+    length(AllAgents, ClusterCount),
     reply_json_dict(_{status: running, agents: Count, file: File,
                       ai_enabled: AI, ai_model: Model,
-                      node: NodeName, peers: PeerCount}).
+                      node: NodeName, redis: Redis,
+                      cluster_agents: ClusterCount}).
 
 %% GET /api/agents - List agents with status
 api_agents(_Request) :-
@@ -277,7 +231,7 @@ api_logs(Request) :-
     ),
     reply_json_dict(_{logs: Entries}).
 
-%% POST /api/send - Send a message to an agent (local or remote)
+%% POST /api/send - Send a message to an agent via Redis LINDA channel
 %%   Body: {"to": "agent_name", "content": "event(args)"}
 api_send(Request) :-
     cors_enable,
@@ -286,18 +240,7 @@ api_send(Request) :-
     atom_string(ContentStr, Dict.content),
     catch(
         (term_string(Content, ContentStr),
-         (federation:fed_is_local(To) ->
-             %% Local agent — send via communication layer (respects told filtering)
-             communication:send(user, To, Content)
-         ;
-             %% Remote agent — forward via federation
-             (federation:fed_find_agent(To, PeerName) ->
-                 federation:fed_remote_send(PeerName, user, To, Content)
-             ;
-                 %% Agent not found anywhere, try local send anyway
-                 communication:send(user, To, Content)
-             )
-         ),
+         communication:send(user, To, Content),
          engine:log_agent(To, "Message sent from web UI: ~w", [Content]),
          reply_json_dict(_{ok: true, message: "Message sent"})
         ),
@@ -556,72 +499,21 @@ api_ai_ask(Request) :-
     ).
 
 %% ============================================================
-%% FEDERATION API HANDLERS
+%% CLUSTER API HANDLER (Redis-based agent registry)
 %% ============================================================
 
-%% GET /api/peers - List known peer instances
-api_peers(_Request) :-
+%% GET /api/cluster - List all agents in the Redis cluster, grouped by node
+api_cluster(_Request) :-
     cors_enable,
-    federation:fed_node_name(MyName),
-    federation:fed_node_url(MyUrl),
-    federation:fed_peers(Peers),
-    reply_json_dict(_{node: MyName, url: MyUrl, peers: Peers}).
+    (node_name_setting(MyName) -> true ; MyName = standalone),
+    (redis_comm:redis_connected -> Redis = true ; Redis = false),
+    redis_comm:redis_registered_agents(AllAgents),
+    %% Group agents by node
+    findall(Node, member(agent_info(Node, _), AllAgents), NodesRaw),
+    sort(NodesRaw, Nodes),
+    maplist(node_agent_dict(AllAgents), Nodes, NodeDicts),
+    reply_json_dict(_{node: MyName, redis: Redis, nodes: NodeDicts}).
 
-%% POST /api/peers/register - Register a peer instance
-%%   Body: {"name": "node2", "url": "http://host:port"}
-api_peer_register(Request) :-
-    cors_enable,
-    http_read_json_dict(Request, Dict),
-    atom_string(Name, Dict.name),
-    atom_string(Url, Dict.url),
-    catch(
-        (federation:fed_register_peer(Name, Url),
-         reply_json_dict(_{ok: true, message: "Peer registered"})),
-        Error,
-        (term_to_atom(Error, E),
-         reply_json_dict(_{ok: false, error: E}))
-    ).
-
-%% POST /api/peers/unregister - Remove a peer
-%%   Body: {"name": "node2"}
-api_peer_unregister(Request) :-
-    cors_enable,
-    http_read_json_dict(Request, Dict),
-    atom_string(Name, Dict.name),
-    federation:fed_unregister_peer(Name),
-    reply_json_dict(_{ok: true, message: "Peer unregistered"}).
-
-%% POST /api/peers/sync - Sync agent lists with all peers
-api_peer_sync(_Request) :-
-    cors_enable,
-    catch(
-        (federation:fed_sync_all,
-         reply_json_dict(_{ok: true, message: "Synced"})),
-        Error,
-        (term_to_atom(Error, E),
-         reply_json_dict(_{ok: false, error: E}))
-    ).
-
-%% GET /api/remote/agents - List local agents (called by peers during sync)
-api_remote_agents(_Request) :-
-    cors_enable,
-    bb_agents(LocalAgents),
-    reply_json_dict(_{agents: LocalAgents}).
-
-%% POST /api/remote/receive - Receive a message from a remote peer
-%%   Body: {"from": "agent_name", "to": "agent_name", "content": "term_string"}
-api_remote_receive(Request) :-
-    cors_enable,
-    http_read_json_dict(Request, Dict),
-    atom_string(From, Dict.from),
-    atom_string(To, Dict.to),
-    atom_string(ContentStr, Dict.content),
-    catch(
-        (term_string(Content, ContentStr),
-         communication:deliver_remote(From, To, Content),
-         reply_json_dict(_{ok: true})),
-        Error,
-        (term_to_atom(Error, E),
-         reply_json_dict(_{ok: false, error: E}))
-    ).
+node_agent_dict(AllAgents, Node, _{node: Node, agents: AgentNames}) :-
+    findall(Name, member(agent_info(Node, Name), AllAgents), AgentNames).
 

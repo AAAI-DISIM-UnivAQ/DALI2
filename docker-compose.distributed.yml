@@ -1,12 +1,26 @@
-# DALI2 Distributed Example - Two-node emergency response
-# Node 1 (sensors): sensor + logger on port 8081
-# Node 2 (responders): coordinator + evacuator + responder + communicator on port 8082
+# DALI2 Distributed Example - Two nodes sharing one Redis
+# All communication goes through the shared Redis instance (star topology).
 #
-# Usage: docker compose -f docker-compose.distributed.yml up --build
-# Then send: curl -X POST http://localhost:8081/api/send -H "Content-Type: application/json" \
-#   -d '{"to":"sensor","content":"detect(fire, rome)"}'
+# Node 1 (sensors): sensor + logger on port 8081
+# Node 2 (responders): coordinator + responder on port 8082
+#
+# Usage:
+#   docker compose -f docker-compose.distributed.yml up --build
+#
+# Test (PowerShell):
+#   curl.exe -X POST http://localhost:8081/api/send -H "Content-Type: application/json" `
+#     -d '{\"to\":\"sensor\",\"content\":\"detect(fire, rome)\"}'
+#
+# Both nodes see each other's agents via the Redis AGENTS registry.
+# Messages between agents on different nodes are routed through Redis LINDA channel.
 
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   sensors:
     build: .
     init: true
@@ -16,9 +30,12 @@ services:
       - ./examples:/dali2/examples
     environment:
       - DALI2_NODE=sensors
-      - DALI2_PEERS=responders@http://responders:8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
     command: ["8080", "examples/emergency_sensors.pl", "--name", "sensors"]
+    depends_on:
+      - redis
     restart: unless-stopped
 
   responders:
@@ -30,7 +47,10 @@ services:
       - ./examples:/dali2/examples
     environment:
       - DALI2_NODE=responders
-      - DALI2_PEERS=sensors@http://sensors:8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
     command: ["8080", "examples/emergency_responders.pl", "--name", "responders"]
+    depends_on:
+      - redis
     restart: unless-stopped

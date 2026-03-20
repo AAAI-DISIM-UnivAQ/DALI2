@@ -178,7 +178,7 @@ handle_fipa_semantics_local(Name, _From, disconfirm(Fact), _T) :- !,
     log_local(Name, "Fact disconfirmed: ~w", [Fact]).
 handle_fipa_semantics_local(Name, From, query_ref(Query), _T) :- !,
     findall(Query, agent_belief_rt(Query), Results),
-    send_to_master(Name, From, inform(query_ref(Query), values(Results))),
+    redis_comm:redis_publish_linda(Name, From, inform(query_ref(Query), values(Results))),
     log_local(Name, "Query_ref response to ~w: ~w", [From, Results]).
 handle_fipa_semantics_local(Name, From, propose(Action), _T) :- !,
     fire_proposal_handlers_local(Name, From, Action).

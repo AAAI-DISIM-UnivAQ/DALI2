@@ -33,7 +33,8 @@
     agent_goals/2,
     all_logs/1,
     log_agent/2,
-    log_agent/3
+    log_agent/3,
+    set_node_name/1
 ]).
 
 :- use_module(blackboard).
@@ -46,6 +47,7 @@
 
 %% Process management state
 :- dynamic agent_file_setting/1.
+:- dynamic node_name_setting/1.     % node_name_setting(NodeName)
 
 %% Agent runtime state
 :- dynamic agent_running/1.            % agent_running(Name)
@@ -84,8 +86,16 @@ stop_all :-
     findall(N, agent_running(N), Names),
     maplist(stop_agent, Names).
 
+%% set_node_name(+NodeName) - Set the node name for this instance
+set_node_name(NodeName) :-
+    retractall(node_name_setting(_)),
+    assert(node_name_setting(NodeName)).
+
+get_node_name(NodeName) :-
+    (node_name_setting(N) -> NodeName = N ; NodeName = standalone).
+
 %% start_agent(+Name) - Start a single agent as a separate OS process
-%%   Communication goes via Redis (LINDA channel), not HTTP.
+%%   Communication goes via Redis (LINDA channel).
 start_agent(Name) :-
     (agent_running(Name) ->
         log_agent(Name, "Agent already running")
@@ -93,6 +103,9 @@ start_agent(Name) :-
         loader:agent_def(Name, Options),
         assert(agent_running(Name)),
         bb_register_agent(Name, Options),
+        %% Register agent in Redis cluster registry
+        get_node_name(NodeName),
+        catch(redis_comm:redis_register_agent(NodeName, Name), _, true),
         get_agent_file(AgentFile),
         %% Spawn separate swipl process — only needs agent name and file
         process_create(
@@ -111,6 +124,9 @@ stop_agent(Name) :-
     (agent_running(Name) ->
         retract(agent_running(Name)),
         bb_unregister_agent(Name),
+        %% Unregister agent from Redis cluster registry
+        get_node_name(NodeName),
+        catch(redis_comm:redis_unregister_agent(NodeName, Name), _, true),
         %% Kill OS process if still running
         (agent_process_pid(Name, Pid) ->
             retract(agent_process_pid(Name, Pid)),
@@ -232,8 +248,11 @@ get_cycle_ms(Options, Ms) :-
 %% ============================================================
 
 %% process_messages(+Name) - Receive, prioritize, and process all pending messages
+%% Note: In the current architecture, agents run as separate OS processes
+%% (agent_process.pl) and poll Redis directly. This engine loop is kept for
+%% potential future in-process agent mode.
 process_messages(Name) :-
-    communication:receive_all(Name, Messages),
+    redis_comm:redis_poll_messages(Name, Messages),
     prioritize_messages(Name, Messages, Sorted),
     process_message_list(Name, Sorted).
 

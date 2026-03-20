@@ -15,7 +15,7 @@ DALI2 is the evolution of the [DALI](https://github.com/AAAI-DISIM-UnivAQ/DALI) 
 - **Docker-ready** — runs in a container with Redis, no local installation needed
 - **LAN-ready** — remote machines on the same network just point to the same Redis instance
 - **AI Oracle** — connect to any LLM via OpenRouter (GPT, Claude, Gemini, etc.)
-- **Extra features** — periodic tasks, condition monitors, helpers, blackboard, federation
+- **Extra features** — periodic tasks, condition monitors, helpers, blackboard
 
 **Documentation:** [RULES.md](RULES.md) (language reference) · [EXAMPLES.md](EXAMPLES.md) (examples guide)
 
@@ -42,202 +42,127 @@ $env:OPENROUTER_API_KEY="sk-or-..."; docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080) in your browser.
 
-### Distributed Mode — Running Agents Across Multiple Devices
+### Deployment Modes
 
-DALI2 supports splitting agents from the **same** agent file across multiple nodes.
-Each node loads the full file but starts only selected agents via `--agents`.
-Nodes discover each other's agents and route messages transparently over HTTP.
+DALI2 uses a **Redis star topology** for all communication. Every agent process connects to the same Redis instance. Messages are routed by agent name through the `LINDA` pub/sub channel — regardless of which terminal or machine the agent runs on. No code changes needed between modes.
 
-Below is a complete walkthrough using the **agriculture** example, splitting 6 agents across 2 nodes.
-
-#### Agent split
-
-| Node | Name | Agents | Role |
-|------|------|--------|------|
-| Node A | `sensors` | `soil_sensor`, `weather_monitor`, `logger` | Field sensors + logging |
-| Node B | `advisors` | `crop_advisor`, `irrigation_controller`, `farmer_agent` | Decision-making |
-
-When `soil_sensor` sends a message to `crop_advisor`, DALI2 automatically forwards it over HTTP to Node B.
-When `irrigation_controller` sends to `logger`, it goes back to Node A. No code changes needed.
-
-#### Option 1: Two Docker containers on the same machine
-
-Open **two terminals** and run one container each:
-
-```sh
-# Terminal 1 — sensors node (port 8081)
-docker run --rm --init -p 8081:8080 \
-  -v ./examples:/dali2/examples \
-  --name agri-sensors \
-  dali2 8080 examples/agriculture.pl --name sensors \
-  --agents soil_sensor,weather_monitor,logger
-
-# Terminal 2 — advisors node (port 8082)
-docker run --rm --init -p 8082:8080 \
-  -v ./examples:/dali2/examples \
-  --name agri-advisors \
-  dali2 8080 examples/agriculture.pl --name advisors \
-  --agents crop_advisor,irrigation_controller,farmer_agent
+```
+┌──────────────────────────────────────────┐
+│              REDIS SERVER                │
+│   LINDA channel │ LOGS channel │ BB SET  │
+└──────┬──────────┼──────────────┼───┬─────┘
+       │          │              │   │
+  ┌────┴────┐  ┌──┴───────┐  ┌──┴───┴──┐
+  │ Node A  │  │  Node B  │  │ Node C  │
+  │ agent_1 │  │ agent_3  │  │ agent_5 │
+  │ agent_2 │  │ agent_4  │  │ agent_6 │
+  └─────────┘  └──────────┘  └─────────┘
 ```
 
-Then connect the peers. Since Docker containers are isolated, create a shared network:
+#### Mode A: All-in-one (single terminal)
+
+One Redis, one server, all agents. Simplest setup.
 
 ```sh
-docker network create dali2-net
-docker network connect dali2-net agri-sensors
-docker network connect dali2-net agri-advisors
+# Docker (recommended)
+docker compose up --build
+
+# Without Docker (requires SWI-Prolog + Redis running on localhost:6379)
+swipl -l src/server.pl -g main -- 8080 examples/agriculture.pl
 ```
 
-Register each node as a peer of the other (use container names as hostnames):
+#### Mode B: Multi-terminal (same machine)
+
+Multiple server instances share one Redis. Each starts a subset of agents with `--agents`.
 
 ```sh
-# Tell sensors node about advisors
-curl -X POST http://localhost:8081/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"advisors","url":"http://agri-advisors:8080"}'
+# Step 1: Start Redis (if not already running)
+docker run -d --name dali2-redis -p 6379:6379 redis:7-alpine
 
-# Tell advisors node about sensors
-curl -X POST http://localhost:8082/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"sensors","url":"http://agri-sensors:8080"}'
-```
-
-> **PowerShell equivalent:**
-> ```powershell
-> Invoke-RestMethod -Uri "http://localhost:8081/api/peers/register" -Method Post `
->   -ContentType "application/json" `
->   -Body '{"name":"advisors","url":"http://agri-advisors:8080"}'
->
-> Invoke-RestMethod -Uri "http://localhost:8082/api/peers/register" -Method Post `
->   -ContentType "application/json" `
->   -Body '{"name":"sensors","url":"http://agri-sensors:8080"}'
-> ```
-
-#### Option 2: Two separate machines
-
-On **Machine A** (e.g. `192.168.1.10`):
-
-```sh
-docker run --rm --init -p 8080:8080 \
-  -v ./examples:/dali2/examples \
-  dali2 8080 examples/agriculture.pl --name sensors \
-  --agents soil_sensor,weather_monitor,logger
-```
-
-On **Machine B** (e.g. `192.168.1.20`):
-
-```sh
-docker run --rm --init -p 8080:8080 \
-  -v ./examples:/dali2/examples \
-  dali2 8080 examples/agriculture.pl --name advisors \
-  --agents crop_advisor,irrigation_controller,farmer_agent
-```
-
-Connect them using real IP addresses:
-
-```sh
-# From Machine A (or any machine)
-curl -X POST http://192.168.1.10:8080/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"advisors","url":"http://192.168.1.20:8080"}'
-
-curl -X POST http://192.168.1.20:8080/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"sensors","url":"http://192.168.1.10:8080"}'
-```
-
-> You can also connect peers from the **Web UI**: open the Federation panel in the left sidebar,
-> enter the peer name and URL, and click **Connect**.
-
-#### Option 3: Without Docker (two shells, SWI-Prolog)
-
-Requires [SWI-Prolog](https://www.swi-prolog.org/) installed locally.
-
-```sh
-# Shell 1 — sensors on port 8081
-swipl -l src/server.pl -g main -t halt -- 8081 examples/agriculture.pl \
+# Step 2: Terminal 1 — sensors node (port 8081)
+swipl -l src/server.pl -g main -- 8081 examples/agriculture.pl \
   --name sensors --agents soil_sensor,weather_monitor,logger
 
-# Shell 2 — advisors on port 8082
-swipl -l src/server.pl -g main -t halt -- 8082 examples/agriculture.pl \
+# Step 3: Terminal 2 — advisors node (port 8082)
+swipl -l src/server.pl -g main -- 8082 examples/agriculture.pl \
   --name advisors --agents crop_advisor,irrigation_controller,farmer_agent
 ```
 
-Connect them (both are on localhost, different ports):
+Both nodes connect to `localhost:6379` by default. Agents on different nodes communicate through Redis automatically.
+
+> **PowerShell:** same commands, just replace `\` with `` ` `` for line continuation.
+
+#### Mode C: Multi-machine
+
+Same as Mode B, but Redis runs on a chosen machine. All nodes point `REDIS_HOST` to that machine.
 
 ```sh
-curl -X POST http://localhost:8081/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"advisors","url":"http://localhost:8082"}'
+# Machine X (192.168.1.10): Start Redis
+docker run -d -p 6379:6379 redis:7-alpine
 
-curl -X POST http://localhost:8082/api/peers/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"sensors","url":"http://localhost:8081"}'
+# Machine Y: Start sensors node
+REDIS_HOST=192.168.1.10 swipl -l src/server.pl -g main -- 8081 \
+  examples/agriculture.pl --name sensors \
+  --agents soil_sensor,weather_monitor,logger
+
+# Machine Z: Start advisors node
+REDIS_HOST=192.168.1.10 swipl -l src/server.pl -g main -- 8082 \
+  examples/agriculture.pl --name advisors \
+  --agents crop_advisor,irrigation_controller,farmer_agent
 ```
 
-#### Testing the distributed setup
+> **PowerShell:**
+> ```powershell
+> $env:REDIS_HOST="192.168.1.10"; swipl -l src/server.pl -g main -- 8081 `
+>   examples/agriculture.pl --name sensors --agents soil_sensor,weather_monitor,logger
+> ```
 
-Send a soil reading to the sensor on Node A:
+#### Pre-configured distributed example (Docker Compose)
 
-```sh
-curl -X POST http://localhost:8081/api/send \
-  -H "Content-Type: application/json" \
-  -d '{"to":"soil_sensor","content":"read_soil(25, 6.5, north_field)"}'
-```
-
-Expected chain of events across both nodes:
-
-1. **soil_sensor** (Node A) receives `read_soil`, sends `soil_data` → **crop_advisor** (Node B) via federation
-2. **crop_advisor** (Node B) detects low moisture (25 < 30), sends `irrigate` → **irrigation_controller** (Node B, local)
-3. **crop_advisor** sends `notify(low_moisture)` → **farmer_agent** (Node B, local)
-4. **irrigation_controller** (Node B) activates irrigation, sends `log_event` → **logger** (Node A) via federation
-5. **farmer_agent** (Node B) logs the notification
-6. **logger** (Node A) receives and logs events from both local and remote agents
-
-Check the logs of each node to verify:
-
-```sh
-# Node A logs
-docker logs agri-sensors
-
-# Node B logs
-docker logs agri-advisors
-```
-
-#### Pre-configured distributed example (emergency)
-
-A ready-made two-node example is also included:
+A ready-made two-node example with shared Redis:
 
 ```sh
 docker compose -f docker-compose.distributed.yml up --build
 ```
 
-This starts `sensors` on port 8081 and `responders` on port 8082, auto-connected via `DALI2_PEERS` env var.
+This starts a shared Redis, `sensors` on port 8081, and `responders` on port 8082 — all connected automatically.
+
+#### Testing the distributed setup
+
+Send a soil reading to the sensor:
+
+```sh
+# Linux/macOS
+curl -X POST http://localhost:8081/api/send \
+  -H "Content-Type: application/json" \
+  -d '{"to":"soil_sensor","content":"read_soil(25, 6.5, north_field)"}'
+
+# PowerShell
+curl.exe -X POST http://localhost:8081/api/send -H "Content-Type: application/json" `
+  -d '{\"to\":\"soil_sensor\",\"content\":\"read_soil(25, 6.5, north_field)\"}'
+```
+
+Expected chain of events across nodes:
+
+1. **soil_sensor** (Node A) receives `read_soil`, sends `soil_report` → **crop_advisor** (Node B) via Redis
+2. **crop_advisor** (Node B) detects low moisture, sends `irrigate` → **irrigation_controller** (Node B)
+3. **irrigation_controller** (Node B) activates irrigation, sends `log_event` → **logger** (Node A) via Redis
+4. **logger** (Node A) logs events from both local and remote agents
+
+Open the web UI on either node to see the **Cluster** panel showing all agents across all nodes.
 
 #### Cleanup
 
-When using **Option 1** (two containers on the same machine), stop and clean up with:
-
 ```sh
-# Stop both containers (or press CTRL+C in each terminal)
-docker stop agri-sensors agri-advisors
-
-# Remove the shared network
-docker network rm dali2-net
-```
-
-For `docker compose` setups, simply use:
-
-```sh
-# Single instance
+# Docker Compose
 docker compose down
-
-# Distributed
 docker compose -f docker-compose.distributed.yml down
+
+# Standalone Redis
+docker stop dali2-redis && docker rm dali2-redis
 ```
 
-> **Tip:** The `--init` flag (used above) and `init: true` in docker-compose files ensure that
-> CTRL+C stops containers cleanly. Without it, `swipl` as PID 1 may not handle signals correctly.
+> **Tip:** The `--init` flag and `init: true` in docker-compose files ensure CTRL+C stops containers cleanly.
 
 ### Windows
 
@@ -321,7 +246,7 @@ Each agent runs as a **separate OS process**. All agents communicate through **R
 
         ┌──────────────────────────────────────┐
         │         Master Server (:8080)        │
-        │  Web UI · REST API · Federation      │
+        │  Web UI · REST API · Cluster         │
         └──────────────────────────────────────┘
 ```
 
@@ -374,7 +299,7 @@ The web interface at `http://localhost:8080` provides:
 - **Agent details** — beliefs, past events, start/stop controls
 - **Blackboard viewer** — current shared blackboard state
 - **Source editor** — edit and hot-reload agent definitions (double-click the DALI2 logo)
-- **Federation panel** — connect peers, view remote agents across nodes
+- **Cluster panel** — view all agents across all nodes in the Redis cluster
 - **AI Oracle panel** — configure API key, model, and test AI queries
 
 ## REST API
@@ -400,12 +325,7 @@ The web interface at `http://localhost:8080` provides:
 | POST | `/api/ai/key` | Set OpenRouter API key `{"key":"sk-or-..."}` |
 | POST | `/api/ai/model` | Set AI model `{"model":"gpt-4o"}` |
 | POST | `/api/ai/ask` | Query AI `{"context":"..."}` |
-| GET | `/api/peers` | List federation peers |
-| POST | `/api/peers/register` | Connect a peer `{"name":"n","url":"http://..."}` |
-| POST | `/api/peers/unregister` | Disconnect a peer `{"name":"n"}` |
-| POST | `/api/peers/sync` | Sync agent lists with all peers |
-| GET | `/api/remote/agents` | List local agents (for peer queries) |
-| POST | `/api/remote/receive` | Receive message from remote peer |
+| GET | `/api/cluster` | List all agents in the Redis cluster, grouped by node |
 
 ## Comparison with DALI
 
@@ -414,7 +334,7 @@ The web interface at `http://localhost:8080` provides:
 | Source files | ~20 | 8 |
 | Agent definition | Multiple files (instances + type files) | Single `.pl` file (multi-agent) |
 | Process model | Separate process per agent + Linda server | **Separate OS process per agent** + Redis pub/sub |
-| Communication | TCP sockets (Linda) | Redis star topology + HTTP federation |
+| Communication | TCP sockets (Linda) | Redis star topology (pub/sub) |
 | Tokenizer | Complex (tokefun + togli_var + metti_var) | None (direct parsing with DALI operators) |
 | UI | Separate Python project (dalia) | Integrated web UI |
 | AI integration | External Python TCP service | Built-in (OpenRouter API) |

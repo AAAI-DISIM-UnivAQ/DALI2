@@ -37,6 +37,10 @@
     redis_bb_read/1,             % redis_bb_read(+Pattern)
     redis_bb_remove/1,           % redis_bb_remove(+Pattern)
     redis_bb_all/2,              % redis_bb_all(+Pattern, -List)
+    redis_register_agent/2,      % redis_register_agent(+Node, +AgentName)
+    redis_unregister_agent/2,    % redis_unregister_agent(+Node, +AgentName)
+    redis_registered_agents/1,   % redis_registered_agents(-AgentList)
+    redis_node_agents/2,         % redis_node_agents(+Node, -AgentList)
     redis_connected/0
 ]).
 
@@ -46,6 +50,7 @@
 
 :- dynamic redis_msg_queue/3.        % redis_msg_queue(To, Content, From) — buffered incoming
 :- dynamic redis_is_connected/0.
+:- dynamic redis_node_name_setting/1. % redis_node_name_setting(NodeName)
 
 %% ============================================================
 %% INITIALIZATION
@@ -280,3 +285,66 @@ redis_bb_all(Pattern, List) :-
     ;
         List = []
     ).
+
+%% ============================================================
+%% AGENT REGISTRY via Redis
+%% Uses Redis SET "AGENTS" with entries "node:agent_name"
+%% Allows any instance to discover all agents in the cluster.
+%% ============================================================
+
+%% redis_register_agent(+Node, +AgentName)
+redis_register_agent(Node, AgentName) :-
+    (redis_is_connected ->
+        format(atom(Entry), "~w:~w", [Node, AgentName]),
+        catch(
+            redis(dali2_redis, sadd('AGENTS', Entry), _),
+            Error,
+            format(user_error, "[Redis] Agent register error: ~w~n", [Error])
+        )
+    ; true).
+
+%% redis_unregister_agent(+Node, +AgentName)
+redis_unregister_agent(Node, AgentName) :-
+    (redis_is_connected ->
+        format(atom(Entry), "~w:~w", [Node, AgentName]),
+        catch(
+            redis(dali2_redis, srem('AGENTS', Entry), _),
+            _Error, true
+        )
+    ; true).
+
+%% redis_registered_agents(-AgentList)
+%% Returns list of agent_info(Node, Name) for all agents in the cluster.
+redis_registered_agents(AgentList) :-
+    (redis_is_connected ->
+        catch(
+            redis(dali2_redis, smembers('AGENTS'), Members),
+            _, Members = []
+        ),
+        findall(agent_info(Node, Name),
+            (member(MemberStr, Members),
+             atom_string(MemberAtom, MemberStr),
+             parse_agent_entry(MemberAtom, Node, Name)),
+            AgentList)
+    ;
+        AgentList = []
+    ).
+
+%% redis_node_agents(+Node, -AgentList)
+%% Returns list of agent names registered under a specific node.
+redis_node_agents(Node, AgentList) :-
+    redis_registered_agents(AllAgents),
+    findall(Name,
+        member(agent_info(Node, Name), AllAgents),
+        AgentList).
+
+%% parse_agent_entry(+Entry, -Node, -Name)
+parse_agent_entry(Entry, Node, Name) :-
+    atom_string(Entry, Str),
+    (sub_string(Str, Before, 1, _, ":") ->
+        sub_string(Str, 0, Before, _, NodeStr),
+        After is Before + 1,
+        sub_string(Str, After, _, 0, NameStr),
+        atom_string(Node, NodeStr),
+        atom_string(Name, NameStr)
+    ; fail).

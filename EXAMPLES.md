@@ -427,7 +427,7 @@ The test commands are the same as for `showcase.pl` (see section 3 above).
 
 **Files:** `examples/emergency_sensors.pl` + `examples/emergency_responders.pl`
 
-Two separate DALI2 nodes communicating via HTTP federation.
+Two separate DALI2 nodes communicating via a shared Redis instance (star topology).
 
 ### Node 1: Sensors (`emergency_sensors.pl`)
 
@@ -447,32 +447,25 @@ Two separate DALI2 nodes communicating via HTTP federation.
 
 ### Running Distributed
 
-**With Docker Compose:**
+**With Docker Compose (recommended):**
 ```bash
 docker compose -f docker-compose.distributed.yml up --build
 ```
+This starts a shared Redis, sensors on port 8081, and responders on port 8082.
 
-**Manually (two terminals):**
+**Manually (three terminals — Redis + two nodes):**
 ```bash
-# Terminal 1 — Sensor node on port 8080
-swipl -l src/server.pl -g main -- 8080 examples/emergency_sensors.pl
+# Terminal 1 — Start Redis
+docker run -d --name dali2-redis -p 6379:6379 redis:7-alpine
 
-# Terminal 2 — Responder node on port 8081
-swipl -l src/server.pl -g main -- 8081 examples/emergency_responders.pl
+# Terminal 2 — Sensor node on port 8080
+swipl -l src/server.pl -g main -- 8080 examples/emergency_sensors.pl --name sensors
+
+# Terminal 3 — Responder node on port 8081
+swipl -l src/server.pl -g main -- 8081 examples/emergency_responders.pl --name responders
 ```
 
-**Register peers:**
-```powershell
-# Tell node 1 about node 2
-curl.exe -X POST http://localhost:8080/api/peers/register -H "Content-Type: application/json" -d "{""name"":""responders"",""url"":""http://localhost:8081""}"
-
-# Tell node 2 about node 1
-curl.exe -X POST http://localhost:8081/api/peers/register -H "Content-Type: application/json" -d "{""name"":""sensors"",""url"":""http://localhost:8080""}"
-
-# Sync agent lists
-curl.exe -X POST http://localhost:8080/api/peers/sync
-curl.exe -X POST http://localhost:8081/api/peers/sync
-```
+Both nodes connect to `localhost:6379` automatically. No peer registration needed.
 
 **Test:**
 ```powershell
@@ -480,7 +473,7 @@ curl.exe -X POST http://localhost:8081/api/peers/sync
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""detect(fire, building_a)""}"
 ```
 
-**Expected:** sensor on node 1 sends alarm to coordinator on node 2 via federation. Coordinator dispatches to evacuator, responder, communicator (all on node 2). Logger messages go back to node 1.
+**Expected:** sensor on node 1 sends alarm to coordinator on node 2 via Redis. Coordinator dispatches to evacuator, responder, communicator (all on node 2). Logger messages go back to node 1 via Redis.
 
 ---
 
@@ -519,6 +512,9 @@ curl.exe http://localhost:8080/api/blackboard
 
 # System logs
 curl.exe http://localhost:8080/api/logs?agent=AGENT
+
+# Cluster view (all agents across all nodes)
+curl.exe http://localhost:8080/api/cluster
 ```
 
 ### Agent Control
