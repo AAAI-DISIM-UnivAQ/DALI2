@@ -19,7 +19,7 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Export past | `head ~/ past1, past2.` |
 | Export past (not done) | `head </ past1, past2.` |
 | Export past (done) | `head ?/ past1, past2.` |
-| Constraint | `condition :~ handler.` |
+| Constraint | `:~ condition.` |
 | Past lifetime | `past_event(ev, 60).` |
 | Remember | `remember_event(ev, 3600).` |
 | Remember limit | `remember_event_mod(ev, number(5), last).` |
@@ -355,13 +355,12 @@ The engine checks past events (received, injected, and internal) for matches. Ea
 
 ## Constraints
 
-Invariant conditions that are checked every cycle. If a constraint is violated (condition is false), the handler body executes.
+Invariant conditions that are checked every cycle. If a constraint is violated (condition is false), the engine logs a warning.
 
 **Syntax:**
 
 ```prolog
-Condition :~ HandlerBody.          %% with handler (fires when Condition is FALSE)
-Condition :~ true.                 %% log-only (no handler action)
+:~ Condition.                      %% prefix syntax, identical to original DALI
 ```
 
 **Examples:**
@@ -370,19 +369,16 @@ Condition :~ true.                 %% log-only (no handler action)
 :- agent(thermostat, [cycle(2)]).
 
 %% Safety constraint: temperature must stay below 50
-%% Left = condition that SHOULD hold; Right = handler if violated
-(believes(current_temp(T)), T < 50) :~ (
-    log("CONSTRAINT VIOLATED: Temperature ~w exceeds safe limit!", [T]),
-    send(coordinator, emergency(overheating, T))
-).
+%% :~ Condition. — fires when Condition is FALSE (violated)
+:~ (believes(current_temp(T)), T < 50).
 
 :- agent(server, [cycle(1)]).
 
-%% Simple constraint (log-only handler)
-believes(config_loaded) :~ log("Config not loaded!").
+%% Invariant: agent must always have a valid config
+:~ believes(config_loaded).
 ```
 
-When a constraint has no handler body, the engine logs a warning when violated but takes no action.
+When a constraint is violated (condition is false), the engine logs a warning. This matches the original DALI semantics where `:~ Cond.` is transformed into `vincolo :- Cond.` and the runtime checks it every cycle.
 
 ---
 
@@ -1047,7 +1043,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Condition-action | `cond :< action.` | `cond :< action.` (identical) |
 | Present event | Atomic (`en/1`) | Atomic (use in body of `:>`, `:<`, `when`) |
 | Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
-| Constraint | `cond :~ handler.` | `cond :~ handler.` (identical) |
+| Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |
 | Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical) |
 | Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical) |

@@ -94,12 +94,9 @@ work_hours_checkI :>
     log("BETWEEN INTERNAL: work hours system check").
 internal_event(work_hours_check, 10, forever, true, in_date(time(0,0), time(23,59))).
 
-%% Constraint: temperature must stay below 50 (DALI :~ syntax)
-%% Left side = condition that should hold; right side = handler if violated
-(believes(current_temp(T)), T < 50) :~ (
-    log("CONSTRAINT VIOLATED: Temperature ~w exceeds safe limit!", [T]),
-    send(coordinator, emergency(overheating, T))
-).
+%% Constraint: temperature must stay below 50 (DALI :~ prefix syntax)
+%% :~ Condition. — fires when Condition is FALSE (violated)
+:~ (believes(current_temp(T)), T < 50).
 
 %% Condition-action rule (DALI :< syntax, edge-triggered)
 believes(mode(cooling)) :< (

@@ -660,7 +660,7 @@ event_in_past(Name, Event) :-
 %% CONSTRAINTS (invariant checking)
 %% ============================================================
 
-%% process_constraints(+Name) - Check all constraints; fire handler if violated
+%% process_constraints(+Name) - Check all constraints; log warning if violated
 process_constraints(Name) :-
     forall(
         loader:agent_constraint(Name, Condition, Body),

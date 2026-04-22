@@ -79,7 +79,7 @@
 :- op(1200, xfx, ~/).
 :- op(1200, xfx, </).
 :- op(1200, xfx, ?/).
-:- op(1200, xfx, :~).
+:- op(1200, fy, :~).
 
 %% Suppress discontiguous warnings for process_term/1 — clauses are
 %% intentionally grouped by feature (DALI operators, then DALI2 compat).
@@ -365,21 +365,12 @@ process_term(?/(Action, PB)) :- !,
     (ctx(Ag) -> assert(agent_past_done_reaction(Ag, TA, EL, true)) ; true).
 
 %% ============================================================
-%% :~ OPERATOR  (constraints)
-%%   agent :~ Cond :- Handler.
-%%   agent :~ Cond.
-%%   :~ Cond :- Handler.        (uses current agent)
-%%   :~ Cond.
+%% :~ OPERATOR  (constraints) — prefix, like original DALI
+%%   :~ Condition.             (constraint checked every cycle)
+%%   Matches DALI's :~ Cond. → vincolo :- Cond.
+%%   If Condition fails, constraint is violated (logged by runtime).
 %% ============================================================
 
-process_term(:~(Name, (Cond :- Handler))) :- atom(Name), agent_def(Name, _), !,
-    transform_body(Handler, TH),
-    assert(agent_constraint(Name, Cond, TH)).
-process_term(:~(Name, Cond)) :- atom(Name), agent_def(Name, _), !,
-    assert(agent_constraint(Name, Cond, true)).
-process_term(:~(Cond, Handler)) :- !,
-    transform_body(Handler, TH),
-    (ctx(Ag) -> assert(agent_constraint(Ag, Cond, TH)) ; true).
 process_term(:~(Cond)) :- !,
     (ctx(Ag) -> assert(agent_constraint(Ag, Cond, true)) ; true).
 
