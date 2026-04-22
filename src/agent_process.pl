@@ -149,7 +149,7 @@ prioritize_messages_local(Name, Messages, Sorted) :-
 assign_priorities_local(_, [], []).
 assign_priorities_local(Name, [Msg|Rest], [P-Msg|PRest]) :-
     Msg = message(_, Content, _),
-    (loader:agent_told(Name, Pattern, Priority),
+    (loader:agent_told(Name, Pattern, Priority, _),
      subsumes_term(Pattern, Content) ->
         P = Priority
     ;
@@ -174,17 +174,19 @@ process_message_list_local(Name, [message(From, Content, T) | Rest]) :-
     process_message_list_local(Name, Rest).
 
 should_allow_receive_local(Receiver, Content, Priority) :-
-    (   \+ loader:agent_told(Receiver, _, _)
+    (   \+ loader:agent_told(Receiver, _, _, _)
     ->  Priority = 0
-    ;   loader:agent_told(Receiver, Pattern, Priority),
-        subsumes_term(Pattern, Content)
+    ;   loader:agent_told(Receiver, Pattern, Priority, Body),
+        subsumes_term(Pattern, Content),
+        (Body == true -> true ; catch(call_condition_local(Body), _, fail))
     ).
 
 should_allow_send_local(Sender, Content) :-
-    (   \+ loader:agent_tell(Sender, _)
+    (   \+ loader:agent_tell(Sender, _, _)
     ->  true
-    ;   loader:agent_tell(Sender, Pattern),
-        subsumes_term(Pattern, Content)
+    ;   loader:agent_tell(Sender, Pattern, Body),
+        subsumes_term(Pattern, Content),
+        (Body == true -> true ; catch(call_condition_local(Body), _, fail))
     ).
 
 %% ============================================================
@@ -398,9 +400,9 @@ process_present_events_local(Name) :-
         catch(execute_body_local(Name, Body), _, true)).
 
 process_multi_events_local(Name) :-
-    forall(loader:agent_multi_event(Name, EventList, Body),
+    forall(loader:agent_multi_event(Name, EventList, Body, DeltaT),
         (term_to_atom(EventList, MultiId),
-         (all_events_occurred_local(EventList) ->
+         (all_events_occurred_local(EventList, DeltaT) ->
             (agent_multi_fired(MultiId) -> true ;
                 assert(agent_multi_fired(MultiId)),
                 catch(execute_body_local(Name, Body), _, true))
@@ -408,10 +410,33 @@ process_multi_events_local(Name) :-
             retractall(agent_multi_fired(MultiId))
          ))).
 
-all_events_occurred_local([]).
-all_events_occurred_local([Event|Rest]) :-
-    event_in_past_local(Event),
-    all_events_occurred_local(Rest).
+%% all_events_occurred_local(+EventList, +DeltaT)
+%% DeltaT = 0 means no time constraint.
+all_events_occurred_local(EventList, DeltaT) :-
+    collect_event_timestamps_local(EventList, Timestamps),
+    (DeltaT =:= 0 ->
+        true
+    ;
+        DeltaTMs is DeltaT * 1000,
+        max_list(Timestamps, MaxT),
+        min_list(Timestamps, MinT),
+        Span is MaxT - MinT,
+        Span =< DeltaTMs
+    ).
+
+collect_event_timestamps_local([], []).
+collect_event_timestamps_local([Event|Rest], [T|Ts]) :-
+    event_in_past_with_time_local(Event, T),
+    collect_event_timestamps_local(Rest, Ts).
+
+event_in_past_with_time_local(Event, T) :-
+    agent_past_event(received(Event, _), T, _), !.
+event_in_past_with_time_local(Event, T) :-
+    agent_past_event(injected(Event), T, _), !.
+event_in_past_with_time_local(Event, T) :-
+    agent_past_event(internal(Event), T, _), !.
+event_in_past_with_time_local(Event, T) :-
+    agent_past_event(Event, T, _), !.
 
 event_in_past_local(Event) :-
     agent_past_event(received(Event, _), _, _), !.

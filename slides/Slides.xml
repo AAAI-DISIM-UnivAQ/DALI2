@@ -252,7 +252,7 @@ REDIS_HOST=192.168.1.10 swipl -l src/server.pl -g main -- 8081 \
     <row><cell>E</cell><cell>External Event</cell><cell>alarmE(Type, Loc)</cell><cell>React to incoming messages or injected events</cell></row>
     <row><cell>I</cell><cell>Internal Event</cell><cell>check_statusI</cell><cell>Proactive event that fires automatically</cell></row>
     <row><cell>A</cell><cell>Action</cell><cell>dispatchA(Type, Loc)</cell><cell>Named, reusable action definition</cell></row>
-    <row><cell>N</cell><cell>Present Event</cell><cell>obstacle_aheadN</cell><cell>Environment observation, fires each cycle</cell></row>
+    <row><cell>N</cell><cell>Present Event</cell><cell>obstacle_aheadN</cell><cell>Atomic environment observation (use in body only)</cell></row>
     <row><cell>P</cell><cell>Past Check</cell><cell>alarmP(Type)</cell><cell>Check if event exists in past memory</cell></row>
   </table>
 </slide>
@@ -304,36 +304,39 @@ update_tempE(NewT) :>
 
 <slide type="code">
   <title>External Events (E + :>)</title>
-  <text>React to incoming messages from other agents or injected events. The E suffix is stripped when matching.</text>
-  <code size="14">:- agent(sensor, [cycle(1)]).
+  <text>React to incoming messages from other agents or injected events. The E suffix is stripped when matching. (From original DALI slides: "Events and Actions")</text>
+  <code size="14">:- agent(doorman, [cycle(1)]).
 
-%% React to a simple event
-readingE(Value) :>
-    log("Sensor reading: ~w", [Value]),
-    send(analyzer, data(Value)).
+%% React to a bell ring event (DALI slide p.7)
+bell_ringsE :> do(open_door).
 
-:- agent(coordinator, [cycle(1)]).
+:- agent(access_controller, [cycle(1)]).
 
-%% React with pattern matching
-alarmE(Type, Location) :>
-    log("Alarm: ~w at ~w", [Type, Location]),
-    assert_belief(active_alarm(Type, Location)),
-    send(responder, respond(Location, Type)).</code>
+%% Access controller (DALI slide p.9)
+situation_okE :> do(open_access).
+situation_unsafeE :> do(limit_access).
+
+:- agent(security, [cycle(1)]).
+
+%% React to alarm with pattern matching (DALI slide p.8)
+alarmE(Kind) :>
+    log("Alarm received: ~w", [Kind]),
+    do(alert_operator).</code>
 </slide>
 
 <slide type="code">
   <title>Communication: send and messageA</title>
-  <text>Two equivalent ways to send messages — DALI2 style (send) and classic DALI style (messageA).</text>
-  <code size="14">:- agent(sensor, [cycle(1)]).
+  <text>Two equivalent ways to send messages — DALI2 style (send) and classic DALI style (messageA). (DALI slides p.7, p.28)</text>
+  <code size="14">:- agent(agent1, [cycle(1)]).
 
-%% DALI2 style — concise
-readingE(Value) :>
-    send(analyzer, data(Value)),
-    broadcast(heartbeat(sensor)).
+%% Classic DALI style (from DALI basic example)
+goE :> messageA(agent2, send_message(go, Me)).
 
-%% Classic DALI style — identical behavior
-readingE(Value) :>
-    messageA(analyzer, send_message(data(Value), sensor)).
+%% DALI2 style — concise, identical behavior
+goE :> send(agent2, go).
+
+%% messageA(To, Comm_primitive(Content, From))
+%% is equivalent to send(To, Content)
 
 %% Other communication predicates:
 %%   send(Agent, Content)     — send to one agent
@@ -344,21 +347,23 @@ readingE(Value) :>
 
 <slide type="code">
   <title>Actions (A Suffix)</title>
-  <text>Named, reusable actions. Actions are recorded in past memory as did(Action).</text>
-  <code size="14">:- agent(worker, [cycle(2)]).
+  <text>Named, reusable actions. Actions are recorded in past memory as did(Action). (DALI slides p.7, p.9)</text>
+  <code size="13">:- agent(doorman, [cycle(1)]).
 
-%% Define an action (A suffix)
-analyzeA(Data) :-
-    log("Executing analysis: ~w", [Data]),
-    assert_belief(analysis_complete(Data)),
-    send(coordinator, inform(analysis_result(Data), complete)).
+%% Action definitions (DALI slide p.7)
+open_doorA :- log("Opening the door").
+get_keyA :- log("Getting the key first").
 
-%% Call the action from a rule body using do/1
-request_analysisE(Data) :>
-    do(analyze(Data)).
+%% Actions with preconditions (DALI slide p.7)
+open_doorA :&lt; believes(have_key(true)).
+open_doorA :&lt; do(get_key).
 
-%% After execution, has_past(did(analyze(Data))) is true
-%% This enables export past rules (?/) to check if action was done</code>
+%% External event triggers an action via do/1
+bell_ringsE :&gt; do(open_door).
+
+%% After do(open_door), has_past(did(open_door)) is true
+%% After do(get_key), has_past(did(get_key)) is true
+%% This enables export past (?/) and past checks (P suffix)</code>
 </slide>
 
 <slide type="code">
@@ -392,22 +397,24 @@ alarmE(Type, Loc) :>
 
 <slide type="code">
   <title>Internal Events (I + :>)</title>
-  <text>Proactive events that fire automatically based on timing and conditions. Defined by handler + configuration.</text>
-  <code size="13">:- agent(thermostat, [cycle(2)]).
+  <text>Internal conclusions initiate further inference (proactivity!). Defined by handler + configuration. (DALI slides p.11–12)</text>
+  <code size="13">:- agent(cook, [cycle(2)]).
 
-%% Handler: what to do when the internal event fires
-temp_checkI :>
-    believes(current_temp(T)),
-    log("Temperature check, current=~w", [T]).
+%% Internal event: cake is ready (DALI slide p.11)
+helper(ready(cake)) :- has_past(put_in_oven(cake)).
+readyI(cake) :>
+    do(take_from_oven(cake)),
+    do(switch_off_oven),
+    log("Cake is ready! Bon appetit.").
+internal_event(ready(cake), 5, forever, true, forever).
 
-%% Configuration: when and how often to fire
-%%   internal_event(Event, Period, Repetition, StartCond, StopCond).
-internal_event(temp_check, 5, forever, true, forever).
+:- agent(security, [cycle(1)]).
 
-%% Period=5      — fire every 5 seconds
-%% forever       — repeat indefinitely
-%% true          — start immediately (no guard condition)
-%% forever       — never stop</code>
+%% Attack detection (DALI slide p.12)
+helper(attack_happening(Cond)) :- believes(suspicious(Cond)).
+attack_happeningI(Cond) :>
+    do(start_emergency(Cond)), do(alert_operator).
+internal_event(attack_happening(_), 3, forever, true, forever).</code>
 </slide>
 
 <slide type="table">
@@ -493,22 +500,24 @@ when(has_past(intrusion_detected)) :-
 
 <slide type="code">
   <title>Condition-Action Rules (:&lt;)</title>
-  <text>Edge-triggered: fires exactly once when condition transitions from false to true. Does not fire again until condition becomes false and then true again.</text>
-  <code size="14">:- agent(thermostat, [cycle(2)]).
+  <text>Edge-triggered: fires exactly once when condition transitions from false to true. (DALI slides p.7, p.9: actions with preconditions)</text>
+  <code size="13">:- agent(access_controller, [cycle(1)]).
 
-%% Fire once when cooling mode activates
-believes(mode(cooling)) :&lt; (
-    log("Cooling mode just activated"),
-    send(logger, log_event(mode_change, thermostat, cooling))
-).
+%% Access controller (DALI slide p.9)
+%% open_access only if access is currently limited
+has_past(did(limit_access)) :&lt; do(open_access).
 
-:- agent(robot, [cycle(1)]).
+%% limit_access only if access is currently open
+has_past(did(open_access)) :&lt; do(limit_access).
 
-%% Fire once when battery becomes low
-believes(battery_level(L)), L &lt; 20 :&lt; (
-    log("Battery low! Requesting charge."),
-    send(charger, request_charge)
-).</code>
+:- agent(doorman, [cycle(1)]).
+
+%% Actions with preconditions (DALI slide p.7)
+%% open_door only when we have the key
+believes(have_key(true)) :&lt; do(open_door).
+
+%% Edge-triggered: fires ONCE when condition becomes true,
+%% then waits for it to become false before firing again.</code>
 </slide>
 
 <slide type="content">
@@ -527,54 +536,64 @@ believes(battery_level(L)), L &lt; 20 :&lt; (
 
 <slide type="code">
   <title>Present Events (N Suffix)</title>
-  <text>Monitor the environment every cycle. Semantically represents observations from the agent's world.</text>
-  <code size="14">:- agent(robot, [cycle(1)]).
+  <text>Atomic environmental observations — the agent perceives them but does not define them. Three stages of an event in DALI (slides p.6–7): N (present) → E (reaction) → P (past memory).</text>
+  <code size="13">%% DALI slide p.6-7: "Perspectives on External Events"
+%% alarm_signalN = present event (Stage 1: perceived, no reaction yet)
+%% alarm_signalE = external event (Stage 2: reaction triggered)
+%% alarm_signalP = past event   (Stage 3: remembered)
 
-%% React to observable state (N suffix)
-obstacle_aheadN :- do(turn_around).
+%% Original DALI example (slide p.7):
+%%   visitor_arrived :- bell_ringsN.  (reasoning about what is happening)
+%%   bell_ringsE :&gt; open_doorA.       (reacting to the event)
 
-%% The N suffix condition is evaluated each cycle
-%% If the condition is true, the body fires
-%% Similar to 'when' but semantically different:
-%%   N = environment observation
-%%   when = internal condition check</code>
+:- agent(doorman, [cycle(1)]).
+
+%% In DALI2, present events are atomic observations.
+%% Use believes() or has_past() to reason about them:
+bell_ringsE :&gt; do(open_door), log("Visitor arrived!").
+
+%% WRONG: bell_ringsN :- do(something). &lt;-- NOT allowed!
+%% Present events are atomic, they have no :- definition.</code>
 </slide>
 
 <slide type="code">
-  <title>Multi-Events (Conjunction)</title>
-  <text>Fire when ALL listed events have occurred in the agent's past memory.</text>
-  <code size="14">:- agent(coordinator, [cycle(2)]).
+  <title>Multi-Events with Delta-T</title>
+  <text>Conjunction of events in the head of a reactive rule. Must occur within a simultaneity interval (delta-t). (DALI slides p.8, Double Events example)</text>
+  <code size="13">:- agent(security, [cycle(1)]).
 
-%% Fire when BOTH sensor_data AND alert have been received
-sensor_dataE(_), alertE(_, _) :>
-    log("Both sensor data and alert received!"),
-    send(logger, log_event(combined_alert, coordinator)).
+%% DALI slide p.8: conjunction of alarms
+alarmE(K1), alarmE(K2), within(60) :&gt;
+    log("Multiple alarms: ~w and ~w", [K1, K2]),
+    do(close_access), do(alert_operator).
 
-%% How it works:
-%%   1. Agent receives sensor_data(85) — stored in past
-%%   2. Agent receives alert(fire, building) — stored in past
-%%   3. Next cycle: engine checks past for both patterns
-%%   4. Both found -> body fires
-%%   5. Resets if any event is removed from past</code>
+:- agent(fire_controller, [cycle(1)]).
+
+%% DALI Double Events example: fire detection
+heat_sensedE(Zone, Temp), smoke_detectedE(Zone, Level), within(60) :&gt;
+    log("Fire in zone ~w! temp=~w smoke=~w", [Zone, Temp, Level]),
+    do(fire_response(Zone, Temp)).
+
+%% within(N) = DALI's t60. / deltat(N) directive
+%% Without within(), events match regardless of timing.</code>
 </slide>
 
 <slide type="code">
   <title>Constraints (:~)</title>
-  <text>Invariant conditions checked every cycle. If violated (condition is false), the handler fires.</text>
+  <text>Invariant conditions checked every cycle. If violated (condition is false), the handler fires. Syntax: Cond :~ Handler.</text>
   <code size="14">:- agent(thermostat, [cycle(2)]).
 
 %% Safety constraint: temperature must stay below 50
-:~ (believes(current_temp(T)), T &lt; 50) :-
+%% Left = condition that SHOULD hold; Right = handler if violated
+(believes(current_temp(T)), T &lt; 50) :~ (
     log("CONSTRAINT VIOLATED: Temp ~w exceeds limit!", [T]),
-    send(coordinator, emergency(overheating, T)).
+    send(coordinator, emergency(overheating, T))
+).
 
-:- agent(server, [cycle(1)]).
+%% Simple constraint (log-only handler)
+believes(config_loaded) :~ log("Config not loaded!").
 
-%% Simple constraint (log-only, no handler body)
-:~ believes(config_loaded).
-
-%% With handler: fires when condition is FALSE
-%% Without handler: logs a warning when violated</code>
+%% Fires when condition is FALSE (violated).
+%% Checked automatically every agent cycle.</code>
 </slide>
 
 <!-- ═══════════════════════════════════════════════════════════
@@ -588,19 +607,23 @@ sensor_dataE(_), alertE(_, _) :>
 
 <slide type="code">
   <title>Achieve Goals (obt_goal)</title>
-  <text>Keep trying a plan every cycle until the goal condition is met.</text>
-  <code size="14">:- agent(sensor, [cycle(2)]).
+  <text>Goals are automatically attempted until they succeed, then expire. (DALI slides p.14–15: "each goal pG will be automatically attempted until it succeeds")</text>
+  <code size="14">:- agent(patient, [cycle(2)]).
 
-%% Keep sending calibration requests until calibrated
-obt_goal(believes(calibrated(true))) :-
-    log("Attempting calibration..."),
-    send(coordinator, calibration_request).
+%% Goal: find a good doctor (inspired by DALI slides p.38-40)
+obt_goal(believes(chosen_doctor(_))) :-
+    log("Searching for a good doctor..."),
+    send(friend_nurse, query_ref(ability(_, _))).
 
-%% Lifecycle:
-%%   1. Each cycle: check if believes(calibrated(true))
-%%   2. If NO  -> execute plan (send calibration_request)
-%%   3. If YES -> mark as "achieved", stop executing
-%%   4. Use reset_goal(Goal) to allow re-attempt</code>
+:- agent(security, [cycle(1)]).
+
+%% Goal: keep trying to connect (DALI slide p.17)
+obt_goal(believes(connection_established)) :-
+    log("Attempting connection..."),
+    send(server, connect_request).
+
+%% Lifecycle: try each cycle until condition met,
+%% then mark as "achieved" and stop.</code>
 </slide>
 
 <slide type="code">
@@ -644,15 +667,16 @@ start_residue_testE :>
 
 <slide type="code">
   <title>Past Event Lifetime</title>
-  <text>Control how long past events are kept in memory. Expired events move to the remember tier.</text>
-  <code size="14">:- agent(sensor, [cycle(2)]).
+  <text>Control how long past events are kept in memory. Mirrors DALI's directives (slides p.9, p.17): "keep open_accessP until limit_accessA".</text>
+  <code size="14">:- agent(access_controller, [cycle(1)]).
 
-%% past_event(Pattern, Duration)
-%% Sensor readings expire after 30 seconds
-past_event(sensor_data(_), 30).
+%% DALI slide p.9: past events with terminating conditions
+%% "keep open_accessP until close_accessA"
+past_event(did(open_access), 3600).   %% keep for 1 hour
+past_event(did(limit_access), 3600).
 
-%% Alarms never expire
-past_event(alarm(_), forever).
+%% DALI slide p.17: keep bornP(daniele,...) forever
+past_event(born(_, _), forever).
 
 %% Check past in rule bodies:
 %%   has_past(Event)         — is event in past memory?
@@ -682,34 +706,38 @@ remember_event_mod(sensor_data(_), number(10), last).
 
 <slide type="code">
   <title>Export Past — ~/ Operator</title>
-  <text>Fire when past event patterns match, then CONSUME (delete) the matched past events.</text>
-  <code size="14">:- agent(coordinator, [cycle(2)]).
+  <text>Fire when past event patterns match, then CONSUME (delete) them. Enables one-shot reactions to event combinations.</text>
+  <code size="14">:- agent(fire_controller, [cycle(1)]).
 
-%% When both alert and sensor_data in past, consume and react
-send(logger, log_event(combined, [Type, Value])) ~/
-    alert(Type, _), sensor_data(Value).
+%% When both heat and smoke detected, consume and respond
+%% (inspired by DALI Double Events fire detection example)
+send(dispatch, fire_response(Zone)) ~/
+    heat_sensed(Zone, _), smoke_detected(Zone, _).
 
-%% After firing:
-%%   - alert(Type, _)  REMOVED from past
-%%   - sensor_data(Value) REMOVED from past
-%%   - Rule cannot fire again with same events
-%%   - New events can trigger it again</code>
+:- agent(security, [cycle(1)]).
+
+%% When alarm and breach both in past, consume and escalate
+do(full_lockdown) ~/
+    alarm(_, _), breach_detected(_).
+
+%% After firing: matched past events are REMOVED.
+%% Rule can fire again only with NEW events.</code>
 </slide>
 
 <slide type="code">
   <title>Export Past — &lt;/ and ?/ Operators</title>
-  <text>Conditional export past based on whether an action was or was not done.</text>
-  <code size="14">:- agent(coordinator, [cycle(2)]).
+  <text>Conditional export past based on whether an action was or was not done. (DALI slide p.9: access controller pattern)</text>
+  <code size="14">:- agent(fire_controller, [cycle(1)]).
 
-%% &lt;/ — Fire only if action was NOT done
-%% Warn if backup was NOT done but critical data exists
-log("Backup NOT done! critical_data needs attention!") &lt;/
-    critical_data(_).
+%% &lt;/ — Fire only if response was NOT done yet
+%% (fire detected but no response action taken)
+log("WARNING: fire detected but no response!") &lt;/
+    heat_sensed(_, _), smoke_detected(_, _).
 
-%% ?/ — Fire only if action WAS done
-%% Only react if we already dispatched a response
-send(logger, log_event(followup)) ?/
-    alarm(fire, _), evacuated(_).
+%% ?/ — Fire only if response WAS already done
+%% (follow-up after fire_response action completed)
+send(logger, log_event(followup_check)) ?/
+    heat_sensed(Zone, _), smoke_detected(Zone, _).
 
 %% Summary:
 %%   ~/  — fire when past events match (unconditional)
@@ -727,23 +755,23 @@ send(logger, log_event(followup)) ?/
 </slide>
 
 <slide type="code">
-  <title>Tell/Told Filtering</title>
-  <text>Control which messages an agent can send (tell) and receive (told). Mirrors DALI's communication.con.</text>
-  <code size="13">:- agent(coordinator, [cycle(2)]).
+  <title>Tell/Told Filtering (with Body Conditions)</title>
+  <text>Filter incoming/outgoing messages with real conditions. (DALI slides p.32–33, p.39–41: trust-based filtering)</text>
+  <code size="12">:- agent(patient, [cycle(2)]).
 
-%% TOLD — receive filter (what I accept, with priority)
-told(_, emergency(_, _), 200) :- true.   %% highest priority
-told(_, alert(_, _), 100) :- true.
-told(_, sensor_data(_), 30) :- true.
-told(_, calibration_request, 10) :- true. %% lowest priority
+%% TOLD — receive filter (DALI slides p.33, p.39)
+%% Only accept messages from agents we trust
+told(Sender, send_message(_)) :-
+    believes(trust(patient, Sender, Trust)), Trust &gt; 0.3.
+told(Sender, execute_proc(Proc)) :-
+    \+ has_past(unreliable(Sender)).
+told(_, inform(_, _), 70) :- true.       %% always accept inform
+told(_, emergency(_)).                   %% 2-arg form (priority=0)
 
-%% TELL — send filter (what I'm allowed to send)
-tell(_, _, calibration_done) :- true.
-tell(_, _, log_event(_, _, _)) :- true.
-
-%% If agent has told rules: only matching messages accepted
-%% If agent has NO told rules: all messages accepted
-%% Same for tell rules</code>
+%% TELL — send filter (DALI slide p.37)
+tell(To, _, send_message(_)) :-
+    believes(trust(patient, To, Trust)), Trust &gt; 0.3.
+tell(_, _, inform(_, _)) :- true.</code>
 </slide>
 
 <slide type="content">
@@ -778,48 +806,48 @@ tell(_, _, log_event(_, _, _)) :- true.
 
 <slide type="code">
   <title>FIPA Examples</title>
-  <text>Using FIPA message types for structured agent interaction.</text>
-  <code size="13">:- agent(sensor, [cycle(1)]).
+  <text>FIPA primitives for influencing "mental state" of other agents. (DALI slides p.30: propose, accept_proposal, send_message)</text>
+  <code size="13">:- agent(patient, [cycle(2)]).
 
-%% Confirm a fact to another agent
-measurement_completeE(Data) :>
-    send(coordinator, confirm(measurement(Data))).
+%% Ask a friend about a doctor (DALI slides p.38-39)
+get_adviceE(Doctor) :>
+    send(friend_nurse, query_ref(ability(Doctor, _))).
 
-:- agent(coordinator, [cycle(2)]).
+%% Handle the response
+informE(query_ref(ability(Doc, _)), values(V)) :>
+    log("Advice about ~w: ~w", [Doc, V]).
 
-%% Query another agent's beliefs
-need_statusE :>
-    send(sensor, query_ref(status(_))).
+:- agent(friend_nurse, [cycle(1)]).
 
-%% Handle the auto-response from query_ref
-informE(query_ref(Q), values(V)) :>
-    log("Query ~w returned: ~w", [Q, V]).
+believes(ability(lung_doctor1, 0.7)).
+believes(ability(lung_doctor2, 0.3)).
 
-%% Check confirmed facts: has_confirmed(Fact)</code>
+%% query_ref auto-responds with matching beliefs
+%% confirm/disconfirm for fact management
+%% propose/accept_proposal for negotiation</code>
 </slide>
 
 <slide type="code">
   <title>Action Proposals (on_proposal)</title>
-  <text>Negotiation between agents using FIPA propose/accept/reject protocol.</text>
-  <code size="12">:- agent(worker, [cycle(2)]).
+  <text>Negotiation via FIPA propose/accept/reject. (DALI slides p.30: propose(Action,[cond1,...,condn], A2))</text>
+  <code size="12">:- agent(lung_doctor1, [cycle(2)]).
 
-%% Handle incoming proposals
-on_proposal(analyze(Data)) :-
-    believes(skill(data_analysis)),
+%% Handle incoming proposals (inspired by DALI slide p.30)
+on_proposal(treat(Patient)) :-
+    believes(available(true)),
     from(Sender),
-    log("Accepting analyze(~w) from ~w", [Data, Sender]),
-    accept_proposal(Sender, analyze(Data)),
-    do(analyze(Data)).
+    log("Accepting treatment for ~w", [Patient]),
+    accept_proposal(Sender, treat(Patient)).
 
-on_proposal(impossible_task) :-
+on_proposal(treat(_)) :-
     from(Sender),
-    reject_proposal(Sender, impossible_task).
+    reject_proposal(Sender, treat(_)).
 
-:- agent(coordinator, [cycle(2)]).
+:- agent(patient, [cycle(2)]).
 
-%% Send a proposal
-request_analysisE(Data) :>
-    send(worker, propose(analyze(Data))).</code>
+%% Send a proposal to a doctor
+choose_doctorE(Doctor) :>
+    send(Doctor, propose(treat(patient))).</code>
 </slide>
 
 <!-- ═══════════════════════════════════════════════════════════
@@ -833,65 +861,69 @@ request_analysisE(Data) :>
 
 <slide type="code">
   <title>Ontology Declarations</title>
-  <text>Define semantic equivalences. Makes event matching and belief checking ontology-aware.</text>
-  <code size="13">:- agent(logger, [cycle(2)]).
+  <text>Meta-reasoning on messages exploiting ontologies. (DALI slides p.34–35: "piove" ↔ "it_rains", symmetric relations like loves(a,b) ↔ loves(b,a))</text>
+  <code size="13">:- agent(patient, [cycle(2)]).
 
-%% Inline ontology declarations
-ontology(same_as(log_event, log_entry)).
+%% DALI slide p.35: ontology for understanding messages
+%% "piove" and "it_rains" are equivalent
+ontology(same_as(piove, it_rains)).
+ontology(same_as(malato, ill)).
 ontology(eq_property(temperature, temp)).
-ontology(eq_class(sensor, detector)).
-ontology(symmetric(related_to)).
 
-%% Effects:
-%%   believes(warm(room1)) matches hot(room1) if same_as(hot,warm)
-%%   readingE(temp(30)) matches reading(temperature(30))
-%%   nearE(a,b) matches near(b,a) if symmetric(near)
+%% Symmetric relations (DALI slide p.35)
+%% loves(pippo, pina) matches loves(pina, pippo)
+ontology(symmetric(loves)).
+ontology(symmetric(near)).
 
 %% External ontology file
-ontology_file('path/to/ontology.pl').
+ontology_file('local_ontology.pl').
 
-%% Explicit check in rule body: onto_match(T1, T2)</code>
+%% If told fails, meta-rules automatically applied
+%% on message contents (DALI slide p.34)</code>
 </slide>
 
 <slide type="code">
   <title>Learning Rules (learn_from)</title>
-  <text>Agents learn from experience. Triggered when matching events occur. [NEW in DALI2]</text>
-  <code size="13">:- agent(sensor, [cycle(2)]).
+  <text>Agents learn from experience. Inspired by DALI slides p.40: patient learns which doctors are effective. [NEW in DALI2]</text>
+  <code size="13">:- agent(patient, [cycle(2)]).
 
-%% Learn that high readings indicate overheating
-learn_from(read_temp(T), overheating) :- T > 80.
+%% Learn doctor effectiveness from treatment outcomes
+%% (inspired by DALI slides p.40: recovered_by / not_recovered_by)
+learn_from(treatment(Doctor, recovered), good_doctor(Doctor)).
+learn_from(treatment(Doctor, not_recovered), bad_doctor(Doctor)).
 
-%% Learn that low readings are normal
-learn_from(read_temp(T), normal) :- T =&lt; 80.
-
-%% Use learned knowledge in rules:
-read_tempE(T) :>
-    ( learned(read_temp(_), overheating) ->
-        log("WARNING: Previously learned overheating!"),
-        send(coordinator, alert(repeated_overheating, T))
-    ; true ).
+%% Use learned knowledge to choose next doctor
+need_doctorE :>
+    ( learned(treatment(Doc, _), good_doctor(Doc)) ->
+        log("Choosing previously effective doctor: ~w", [Doc]),
+        send(Doc, request_appointment)
+    ;
+        log("No learned preference, asking friends..."),
+        send(friend_nurse, query_ref(ability(_, _)))
+    ).
 
 %% Predicates: learn(P,O), learned(P,O), forget(P)</code>
 </slide>
 
 <slide type="code">
   <title>Helpers</title>
-  <text>Utility predicates that can be called from rule bodies. [NEW in DALI2]</text>
-  <code size="14">:- agent(logger, [cycle(2)]).
+  <text>Utility predicates callable from rule bodies. In original DALI, plain clauses served this role (e.g. access_is_limited :- limit_accessP). [NEW in DALI2]</text>
+  <code size="13">:- agent(access_controller, [cycle(1)]).
 
-%% Define a helper
-helper(count_logs) :-
-    findall(_, believes(logged(_, _)), Logs),
-    length(Logs, N),
-    log("Total log entries: ~w", [N]).
+%% DALI slide p.9: helper conditions for access state
+helper(access_is_limited) :- has_past(did(limit_access)).
+helper(access_is_open) :- has_past(did(open_access)).
 
-%% Call helper from a rule body
-log_eventE(Type, Source) :>
-    assert_belief(logged(Type, Source)),
-    helper(count_logs).
+%% Used in condition-action rules:
+has_past(did(limit_access)) :&lt; do(open_access).
+has_past(did(open_access)) :&lt; do(limit_access).
 
-%% Helpers are agent-local utility predicates
-%% They can use all DSL predicates (believes, send, log, etc.)</code>
+:- agent(cook, [cycle(2)]).
+
+%% DALI slide p.11: helper to check if cake is ready
+helper(ready(cake)) :- has_past(put_in_oven(cake)).
+
+%% Helpers can use: believes, has_past, log, send, etc.</code>
 </slide>
 
 <slide type="code">
@@ -1092,10 +1124,10 @@ sense(fire, building_a)
   <text>File: examples/showcase.pl — Demonstrates ALL 32 DALI2 features in one file.</text>
   <bullets>
     <b>**thermostat** — internal events (interval, change, trigger, between), constraints, condition-action</b>
-    <b>**sensor** — periodic tasks, present events, learning, blackboard, past lifetime, goals</b>
-    <b>**coordinator** — tell/told, FIPA messages, multi-events, goals, residue, export past, AI oracle</b>
+    <b>**sensor** — periodic tasks, learning, blackboard, past lifetime, goals</b>
+    <b>**coordinator** — tell/told (body conditions), FIPA, multi-events (delta-t), goals, residue, export past, AI</b>
     <b>**logger** — ontology (inline + external file), helpers, condition monitors</b>
-    <b>**worker** — action proposals (on_proposal), FIPA responses, actions, told rules</b>
+    <b>**worker** — action proposals (on_proposal), FIPA responses, actions, told rules (body conditions)</b>
     <b>**10-step test sequence** — from basic events to FIPA proposals to residue goals</b>
   </bullets>
 </slide>
@@ -1145,6 +1177,9 @@ swipl -l src/server.pl -g main \
     <row><cell>AI integration</cell><cell>External Python TCP</cell><cell>Built-in (OpenRouter)</cell></row>
     <row><cell>Docker</cell><cell>Complex (SICStus)</cell><cell>Simple (swipl image)</cell></row>
     <row><cell>Event syntax</cell><cell>eventE(X) :> body.</cell><cell>eventE(X) :> body. (identical!)</cell></row>
+    <row><cell>Present events</cell><cell>Atomic (en/1)</cell><cell>Atomic (body only, no :- definition)</cell></row>
+    <row><cell>Multi-events</cell><cell>deltat/1 time window</cell><cell>within(Seconds) in event list</cell></row>
+    <row><cell>Tell/Told</cell><cell>Body conditions supported</cell><cell>Body conditions supported (identical!)</cell></row>
     <row><cell>Send message</cell><cell>messageA(dest, send_message(...))</cell><cell>Same, or send(dest, content)</cell></row>
   </table>
 </slide>

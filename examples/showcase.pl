@@ -151,12 +151,12 @@ remember_event_mod(sensor_data(_), number(10), last).
 %% Periodic task: heartbeat every 15 seconds [NEW]
 every(15, log("Sensor heartbeat")).
 
-%% Present event (N suffix — monitor blackboard, consume after reading)
-env_checkN :-
-    bb_read(environment(temp, T)),
-    bb_remove(environment(temp, T)),
-    log("PRESENT: Environment temperature from blackboard: ~w", [T]),
-    send(thermostat, update_temp(T)).
+%% Present events are atomic environmental observations.
+%% They cannot be defined with :- (they are set by the environment).
+%% Use them as conditions in reactive rules instead:
+read_tempE(T) :>
+    bb_write(environment(temp, T)),
+    log("Sensor stored temp ~w on blackboard", [T]).
 
 %% Learning rules [NEW]
 learn_from(read_temp(T), overheating) :- T > 80.
@@ -207,7 +207,8 @@ calibration_doneE :>
 believes(status(active)).
 believes(alerts_received(0)).
 
-%% Told rules (DALI communication.con style, 3-arg form)
+%% Told rules — DALI communication filtering with body conditions.
+%% Body can contain real conditions (not just true).
 told(_, emergency(_, _), 200) :- true.         %% highest priority
 told(_, alert(_, _), 100) :- true.
 told(_, confirm(_), 90) :- true.
@@ -216,7 +217,7 @@ told(_, accept_proposal(_), 70) :- true.
 told(_, reject_proposal(_), 70) :- true.
 told(_, query_ref(_), 60) :- true.
 told(_, notify(_, _), 50) :- true.
-told(_, sensor_data(_), 30) :- true.
+told(_, sensor_data(_), 30) :- believes(status(active)).  %% accept only when active
 told(_, calibration_request, 10) :- true.       %% lowest priority
 told(_, send_confirm(_), 90) :- true.
 told(_, query_worker(_), 60) :- true.
@@ -224,19 +225,21 @@ told(_, request_analysis(_), 70) :- true.
 told(_, test_reject, 70) :- true.
 told(_, start_residue_test, 50) :- true.
 told(_, critical_data(_), 50) :- true.
+told(_, heartbeat).                              %% 2-arg form (priority=0, body=true)
 
-%% Tell rules (DALI communication.con style, 3-arg form)
+%% Tell rules — body conditions supported
 tell(_, _, calibration_done) :- true.
 tell(_, _, response(_)) :- true.
 tell(_, _, log_event(_, _, _)) :- true.
-tell(_, _, propose(_)) :- true.
+tell(_, _, propose(_)) :- believes(status(active)).  %% send proposals only when active
 tell(_, _, confirm(_)) :- true.
 tell(_, _, query_ref(_)) :- true.
 tell(_, _, analyze(_)) :- true.
 
-%% Multi-event: fire when both sensor data AND an alert have been received
-sensor_dataE(_), alertE(_, _) :>
-    log("MULTI-EVENT: Both sensor data and alert received!"),
+%% Multi-event with delta-t: fire when both sensor data AND an alert
+%% have been received within 10 seconds of each other.
+sensor_dataE(_), alertE(_, _), within(10) :>
+    log("MULTI-EVENT: Both sensor data and alert received within 10s!"),
     send(logger, log_event(combined_alert, coordinator, multi_trigger)).
 
 %% External event handlers (DALI :> syntax with E suffix)
@@ -373,8 +376,8 @@ believes(available(true)).
 believes(skill(data_analysis)).
 believes(status(ready)).
 
-%% Told rules (DALI communication.con style)
-told(_, propose(_), 100) :- true.
+%% Told rules with body conditions
+told(_, propose(_), 100) :- believes(available(true)).  %% accept proposals only when available
 told(_, confirm(_), 90) :- true.
 told(_, query_ref(_), 80) :- true.
 told(_, inform(_, _), 70) :- true.

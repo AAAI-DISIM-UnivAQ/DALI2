@@ -8,14 +8,15 @@
 %%   eventI(X) :> body.                       Internal event
 %%   internal_event(Ev, Period, Rep, S, St).  Internal event configuration
 %%   actionA(X) :- body.                      Action definition
-%%   condN :- body.                           Present event
+%%   condN                                    Present event (atomic, body only)
 %%   cond :< action.                          Condition-action
 %%   head ~/ past1, past2.                    Export past
 %%   head </ past1, past2.                    Export past NOT done
 %%   head ?/ past1, past2.                    Export past done
 %%   :~ condition.                            Constraint
-%%   told(_, Pattern, Priority) :- true.      Told rule
-%%   tell(_, _, Pattern) :- true.             Tell rule
+%%   told(_, Pattern, Priority) :- Body.      Told rule (3-arg)
+%%   told(_, Pattern) :- Body.                Told rule (2-arg, priority=0)
+%%   tell(_, _, Pattern) :- Body.             Tell rule
 %%   past_event(Event, Duration).             Past lifetime
 %%   remember_event(Event, Duration).         Remember lifetime
 %%   remember_event_mod(Ev, number(N), M).    Remember limit
@@ -42,11 +43,11 @@
     agent_belief/2,
     agent_helper/3,
     agent_internal/4,
-    agent_told/3,
-    agent_tell/2,
+    agent_told/4,
+    agent_tell/3,
     agent_condition_action/3,
     agent_present/3,
-    agent_multi_event/3,
+    agent_multi_event/4,
     agent_constraint/3,
     agent_ontology/2,
     agent_learn_rule/4,
@@ -68,6 +69,10 @@
 
 %% ============================================================
 %% DALI OPERATORS
+%% Note: DALI original (SICStus) used mixed precedences (500/10/200/1200 xfy)
+%% plus dual declarations like op(1200,xfx,[:-,:>]).
+%% SWI-Prolog does not allow the same operator with two precedences,
+%% so we use uniform 1200/xfx which correctly handles top-level clauses.
 %% ============================================================
 :- op(1200, xfx, :>).
 :- op(1200, xfx, :<).
@@ -91,11 +96,11 @@
 :- dynamic agent_belief/2.
 :- dynamic agent_helper/3.
 :- dynamic agent_internal/4.
-:- dynamic agent_told/3.
-:- dynamic agent_tell/2.
+:- dynamic agent_told/4.       % agent_told(Agent, Pattern, Priority, Body)
+:- dynamic agent_tell/3.        % agent_tell(Agent, Pattern, Body)
 :- dynamic agent_condition_action/3.
 :- dynamic agent_present/3.
-:- dynamic agent_multi_event/3.
+:- dynamic agent_multi_event/4. % agent_multi_event(Agent, EventList, Body, DeltaT)
 :- dynamic agent_constraint/3.
 :- dynamic agent_ontology/2.
 :- dynamic agent_learn_rule/4.
@@ -124,11 +129,11 @@ clear_definitions :-
     retractall(agent_belief(_, _)),
     retractall(agent_helper(_, _, _)),
     retractall(agent_internal(_, _, _, _)),
-    retractall(agent_told(_, _, _)),
-    retractall(agent_tell(_, _)),
+    retractall(agent_told(_, _, _, _)),
+    retractall(agent_tell(_, _, _)),
     retractall(agent_condition_action(_, _, _)),
     retractall(agent_present(_, _, _)),
-    retractall(agent_multi_event(_, _, _)),
+    retractall(agent_multi_event(_, _, _, _)),
     retractall(agent_constraint(_, _, _)),
     retractall(agent_ontology(_, _)),
     retractall(agent_learn_rule(_, _, _, _)),
@@ -280,8 +285,8 @@ process_term(:>(Head, Body)) :- !,
 
 process_reactive_rule(Name, Head, Body) :-
     (Head = (_H1, _H2) ->
-        collect_multi_events(Head, EventList),
-        assert(agent_multi_event(Name, EventList, Body))
+        collect_multi_events(Head, EventList, DeltaT),
+        assert(agent_multi_event(Name, EventList, Body, DeltaT))
     ;
         (strip_suffix_term(Head, BaseHead, Suffix) ->
             process_suffixed_reactive(Name, BaseHead, Suffix, Body)
@@ -297,10 +302,18 @@ process_suffixed_reactive(Name, BaseHead, 'I', Body) :- !,
 process_suffixed_reactive(Name, BaseHead, _, Body) :-
     assert(agent_handler(Name, BaseHead, Body)).
 
-collect_multi_events((H1, H2), [Base1 | Rest]) :- !,
-    (strip_suffix_term(H1, Base1, 'E') -> true ; Base1 = H1),
-    collect_multi_events(H2, Rest).
-collect_multi_events(H, [Base]) :-
+collect_multi_events(Events, EventList, DeltaT) :-
+    collect_multi_events_acc(Events, RawList),
+    (select(within(DT), RawList, EventList) -> DeltaT = DT ; EventList = RawList, DeltaT = 0).
+
+collect_multi_events_acc((H1, H2), [Parsed | Rest]) :- !,
+    parse_multi_event_term(H1, Parsed),
+    collect_multi_events_acc(H2, Rest).
+collect_multi_events_acc(H, [Parsed]) :-
+    parse_multi_event_term(H, Parsed).
+
+parse_multi_event_term(within(DT), within(DT)) :- !.
+parse_multi_event_term(H, Base) :-
     (strip_suffix_term(H, Base, 'E') -> true ; Base = H).
 
 %% ============================================================
@@ -425,15 +438,29 @@ process_term(test_goal(G, ExtraCond)) :- !,
 process_term(test_goal(G)) :- !,
     (ctx(Ag) -> assert(agent_goal(Ag, test, G, true)) ; true).
 
-%% told/tell  —  DALI communication.con style (no prefix)
-process_term((told(_, Pat, Pri) :- true)) :- !,
-    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri)) ; true).
+%% told/tell  —  DALI communication filtering rules
+%% Supports arbitrary body conditions (not just true).
+%% told(From, Pattern, Priority) :- Body.   3-arg with body
+%% told(From, Pattern, Priority).           3-arg bare (body=true)
+%% told(From, Pattern) :- Body.             2-arg with body (priority=0)
+%% told(From, Pattern).                     2-arg bare (priority=0, body=true)
+%% tell(To, From, Pattern) :- Body.         3-arg with body
+%% tell(To, From, Pattern).                 3-arg bare (body=true)
+process_term((told(_, Pat, Pri) :- Body)) :- !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri, TB)) ; true).
 process_term(told(_, Pat, Pri)) :- !,
-    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri)) ; true).
-process_term((tell(_, _, Pat) :- true)) :- !,
-    (ctx(Ag) -> assert(agent_tell(Ag, Pat)) ; true).
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri, true)) ; true).
+process_term((told(_, Pat) :- Body)) :- !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, 0, TB)) ; true).
+process_term(told(_, Pat)) :- !,
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, 0, true)) ; true).
+process_term((tell(_, _, Pat) :- Body)) :- !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_tell(Ag, Pat, TB)) ; true).
 process_term(tell(_, _, Pat)) :- !,
-    (ctx(Ag) -> assert(agent_tell(Ag, Pat)) ; true).
+    (ctx(Ag) -> assert(agent_tell(Ag, Pat, true)) ; true).
 
 %% believes (no prefix)
 process_term(Name:believes(Fact)) :- !, assert(agent_belief(Name, Fact)).
@@ -503,7 +530,7 @@ process_term(ontology_file(F)) :- !,
     (ctx(Ag) -> assert(agent_ontology_file(Ag, F)) ; true).
 
 %% ============================================================
-%% PREFIX-LESS Action (A suffix) and Present (N suffix)
+%% PREFIX-LESS Action (A suffix)
 %% These must be AFTER all specific functor matches to avoid
 %% accidentally matching told/tell/believes/etc.
 %% ============================================================
@@ -515,24 +542,22 @@ process_term((Head :- Body)) :-
     transform_body(Body, TB),
     (ctx(Ag) -> assert(agent_action(Ag, BaseHead, TB)) ; true).
 
-%% condN(Args) :- Body.   (no prefix, present event)
-process_term((Head :- Body)) :-
-    nonvar(Head), \+ (Head = _:_),
-    strip_suffix_term(Head, BaseHead, 'N'), !,
-    transform_body(Body, TB),
-    (ctx(Ag) -> assert(agent_present(Ag, BaseHead, TB)) ; true).
-
 %% actionA(Args) :- Body.  (with prefix)
 process_term((Name:Head :- Body)) :-
     strip_suffix_term(Head, BaseHead, 'A'), !,
     transform_body(Body, TB),
     assert(agent_action(Name, BaseHead, TB)).
 
-%% condN(Args) :- Body.  (with prefix)
-process_term((Name:Head :- Body)) :-
-    strip_suffix_term(Head, BaseHead, 'N'), !,
-    transform_body(Body, TB),
-    assert(agent_present(Name, BaseHead, TB)).
+%% BLOCKED: Present events (N suffix) and External events (E suffix)
+%% must NOT appear as head of :- rules. They are atomic observations.
+process_term((Head :- _Body)) :-
+    nonvar(Head), \+ (Head = _:_),
+    strip_suffix_term(Head, _BaseHead, 'N'), !,
+    format(user_error, "DALI2 loader WARNING: Present event '~w' cannot be defined with :- (it is atomic). Use it in body of :> or :< rules instead.~n", [Head]).
+process_term((Head :- _Body)) :-
+    nonvar(Head), \+ (Head = _:_),
+    strip_suffix_term(Head, _BaseHead, 'E'), !,
+    format(user_error, "DALI2 loader WARNING: External event '~w' cannot be defined with :- (it is atomic). Use :> operator instead: ~w :> body.~n", [Head, Head]).
 
 %% ============================================================
 %% CATCH-ALL: bare Prolog facts/rules as beliefs or ignored

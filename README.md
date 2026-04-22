@@ -8,7 +8,7 @@ DALI2 is the evolution of the [DALI](https://github.com/AAAI-DISIM-UnivAQ/DALI) 
 
 - **Identical DALI syntax** — no prefix needed, same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI
 - **Single-file multi-agent** — define all agents in one `.pl` file; `:- agent(name).` sets the context for subsequent rules
-- **Full DALI feature set** — reactive rules, internal events, goals, constraints, learning, ontologies, tell/told filtering, and more
+- **Full DALI feature set** — reactive rules, internal events, goals, constraints, learning, ontologies, tell/told filtering (with body conditions), multi-events (with delta-t), and more
 - **Process-per-agent architecture** — each agent runs as a separate OS process
 - **Redis star topology** — agents communicate via Redis pub/sub (`LINDA` channel for messages, `LOGS` channel for monitoring)
 - **Integrated web UI** — dashboard, log viewer, message sender, agent inspector

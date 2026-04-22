@@ -14,19 +14,20 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Internal event | `eventI(X) :> body.` |
 | Internal config | `internal_event(ev, 3, forever, true, stop).` |
 | Action definition | `actionA(X) :- body.` |
-| Present event | `condN :- body.` |
+| Present event | `condN` (atomic, body only) |
 | Condition-action | `cond :< action.` |
 | Export past | `head ~/ past1, past2.` |
 | Export past (not done) | `head </ past1, past2.` |
 | Export past (done) | `head ?/ past1, past2.` |
-| Constraint | `:~ condition.` |
+| Constraint | `condition :~ handler.` |
 | Past lifetime | `past_event(ev, 60).` |
 | Remember | `remember_event(ev, 3600).` |
 | Remember limit | `remember_event_mod(ev, number(5), last).` |
 | Obtain goal | `obt_goal(goal) :- plan.` |
 | Test goal | `test_goal(goal) :- plan.` |
-| Told rule | `told(_, pattern, priority) :- true.` |
-| Tell rule | `tell(_, _, pattern) :- true.` |
+| Told rule | `told(_, pattern, priority) :- body.` |
+| Told rule (no priority) | `told(_, pattern) :- body.` |
+| Tell rule | `tell(_, _, pattern) :- body.` |
 | Message sending | `messageA(dest, send_message(content, Me))` |
 | Past check | `evp(event)` or `eventP(args)` |
 | Residue goal | `tenta_residuo(goal)` |
@@ -295,24 +296,28 @@ believes(battery_level(L)), L < 20 :< (
 
 ## Present/Environment Events
 
-Monitor the environment (blackboard, external state) every cycle. Similar to `when` but semantically represents observations from the agent's environment rather than internal reasoning.
+Present events (suffix `N`) represent **atomic environmental observations**. They cannot be "defined" with `:-` — they are set by the environment and checked as conditions in other rules.
 
-**Syntax:**
+This matches the original DALI semantics where present events (`en/1`) are flags that the environment sets, and the agent uses them as triggers/conditions in reactive rules.
 
-```prolog
-conditionN(Args) :- Body.
-```
-
-The `N` suffix marks present events. The condition is evaluated each cycle; if true, the body fires.
-
-**Examples:**
+**Usage:** Present events appear only in the **body** of `:>`, `:<`, or `when` rules:
 
 ```prolog
 :- agent(robot, [cycle(1)]).
 
-%% React to a belief representing an observable state (N suffix)
-obstacle_aheadN :- do(turn_around).
+%% React to an environmental observation via reactive rule
+obstacle_detectedE(Distance) :>
+    Distance < 5,
+    log("Obstacle detected at ~w meters, turning around", [Distance]),
+    do(turn_around).
+
+%% Or use when() to monitor an environmental condition each cycle
+when(believes(obstacle_ahead(true))) :-
+    do(turn_around),
+    log("Obstacle ahead — turning").
 ```
+
+**Important:** Writing `condN :- body.` (N suffix in the head of `:-`) is **not allowed** and will produce a loader warning. Present events are atomic — they don't have definitions.
 
 ---
 
@@ -323,21 +328,28 @@ Fire when **all** listed events have occurred in the agent's past memory. The bo
 **Syntax:**
 
 ```prolog
-event1E(Args), event2E(Args) :> Body.
+event1E(Args), event2E(Args) :> Body.                      %% no time constraint
+event1E(Args), event2E(Args), within(Seconds) :> Body.     %% with delta-t
 ```
+
+The optional `within(Seconds)` specifies a **delta-t** (simultaneity interval): all events must have occurred within the given time window. This mirrors DALI's original `deltat/1` mechanism. Without `within`, events are matched regardless of when they occurred.
 
 **Examples:**
 
 ```prolog
 :- agent(coordinator, [cycle(2)]).
 
-%% Fire when both sensor data AND alert received (DALI multi-event)
-sensor_dataE(_), alertE(_, _) :>
-    log("Both sensor data and alert received!"),
+%% Fire when both sensor data AND alert received within 10 seconds
+sensor_dataE(_), alertE(_, _), within(10) :>
+    log("Both events received within 10s!"),
     send(logger, log_event(combined_alert, coordinator, multi_trigger)).
+
+%% Fire when all three events occurred (no time constraint)
+loginE(User), verifyE(User), authorizeE(User) :>
+    log("User ~w fully authenticated", [User]).
 ```
 
-The engine checks past events (received, injected, and internal) for matches. Each event in the list must have occurred at least once.
+The engine checks past events (received, injected, and internal) for matches. Each event in the list must have occurred at least once. With `within(N)`, the timestamps of all matched events must fall within an N-second window.
 
 ---
 
@@ -348,8 +360,8 @@ Invariant conditions that are checked every cycle. If a constraint is violated (
 **Syntax:**
 
 ```prolog
-:~ Condition :- HandlerBody.     %% with handler
-:~ Condition.                     %% log-only (no handler)
+Condition :~ HandlerBody.          %% with handler (fires when Condition is FALSE)
+Condition :~ true.                 %% log-only (no handler action)
 ```
 
 **Examples:**
@@ -357,15 +369,17 @@ Invariant conditions that are checked every cycle. If a constraint is violated (
 ```prolog
 :- agent(thermostat, [cycle(2)]).
 
-%% Safety constraint: temperature must stay below 50 (DALI :~ syntax)
-:~ (believes(current_temp(T)), T < 50) :-
+%% Safety constraint: temperature must stay below 50
+%% Left = condition that SHOULD hold; Right = handler if violated
+(believes(current_temp(T)), T < 50) :~ (
     log("CONSTRAINT VIOLATED: Temperature ~w exceeds safe limit!", [T]),
-    send(coordinator, emergency(overheating, T)).
+    send(coordinator, emergency(overheating, T))
+).
 
 :- agent(server, [cycle(1)]).
 
-%% Invariant: agent must always have a valid config
-:~ believes(config_loaded).
+%% Simple constraint (log-only handler)
+believes(config_loaded) :~ log("Config not loaded!").
 ```
 
 When a constraint has no handler body, the engine logs a warning when violated but takes no action.
@@ -417,29 +431,35 @@ Control which messages an agent can send and receive. Mirrors DALI's `communicat
 
 ### Told (receive filter)
 
-Defines which message patterns an agent is willing to accept.
+Defines which message patterns an agent is willing to accept. The body can contain **conditions** that must be satisfied for the message to be accepted.
 
 **Syntax:**
 
 ```prolog
-told(_, Pattern, Priority) :- true.    %% accept with priority (numeric)
+told(_, Pattern, Priority) :- Body.    %% 3-arg: accept with priority and condition
+told(_, Pattern) :- Body.              %% 2-arg: accept with condition (priority=0)
+told(_, Pattern, Priority).            %% 3-arg bare: accept unconditionally
+told(_, Pattern).                      %% 2-arg bare: accept unconditionally (priority=0)
 ```
 
-If an agent has **any** `told` rules, only messages matching at least one `told` pattern are accepted. Messages not matching are rejected with a log entry. If an agent has **no** `told` rules, all messages are accepted (backward compatible).
+If an agent has **any** `told` rules, only messages matching at least one `told` pattern **and** whose body condition succeeds are accepted. Messages not matching are rejected with a log entry. If an agent has **no** `told` rules, all messages are accepted (backward compatible).
 
 **Priority Queue**: When an agent has `told` rules with priority values, incoming messages are **sorted by priority** (highest first) before processing. This mirrors DALI's priority-based message queue.
 
+**Body conditions**: The body of a told rule is evaluated as a condition when a matching message arrives. This allows filtering based on agent state (beliefs, past events, etc.). Using `true` as body means unconditional acceptance.
+
 ### Tell (send filter)
 
-Defines which message patterns an agent is allowed to send.
+Defines which message patterns an agent is allowed to send. The body can contain **conditions**.
 
 **Syntax:**
 
 ```prolog
-tell(_, _, Pattern) :- true.           %% allowed to send Pattern
+tell(_, _, Pattern) :- Body.           %% allowed to send Pattern if Body holds
+tell(_, _, Pattern).                   %% allowed unconditionally
 ```
 
-If an agent has **any** `tell` rules, only messages matching at least one `tell` pattern can be sent. Others are blocked. If an agent has **no** `tell` rules, all messages are allowed.
+If an agent has **any** `tell` rules, only messages matching at least one `tell` pattern **and** whose body condition succeeds can be sent. Others are blocked. If an agent has **no** `tell` rules, all messages are allowed.
 
 ### AI Oracle Filtering
 
@@ -455,14 +475,19 @@ This ensures agents can control what information they share with the AI oracle a
 ```prolog
 :- agent(coordinator, [cycle(2)]).
 
-%% Told rules (DALI communication.con style, 3-arg form)
-told(_, emergency(_, _), 200) :- true.     %% highest priority
+%% Told rules with body conditions
+told(_, emergency(_, _), 200) :- true.                     %% always accept emergencies
 told(_, alert(_, _), 100) :- true.
-told(_, sensor_data(_), 30) :- true.
-told(_, calibration_request, 10) :- true.  %% lowest priority
+told(_, sensor_data(_), 30) :- believes(status(active)).   %% accept only when active
+told(_, calibration_request, 10) :- true.
+told(_, heartbeat).                                        %% 2-arg form (priority=0)
 
-%% Tell rules (DALI communication.con style, 3-arg form)
+%% Told with complex body condition (like DALI communication.con)
+told(_, refuse(_, Xp)) :- functor(Xp, Fp, _), Fp = agree. %% only accept refuse if about agree
+
+%% Tell rules with body conditions
 tell(_, _, calibration_done) :- true.
+tell(_, _, propose(_)) :- believes(status(active)).        %% send proposals only when active
 tell(_, _, log_event(_, _, _)) :- true.
 tell(_, _, analyze(_)) :- true.
 ```
@@ -1020,9 +1045,9 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | External event | `eventE(X) :> body.` | `eventE(X) :> body.` (identical) |
 | Internal event | `eventI :> body.` + `internal_event/5` | `eventI :> body.` + `internal_event/5` (identical) |
 | Condition-action | `cond :< action.` | `cond :< action.` (identical) |
-| Present event | `condN :- body.` | `condN :- body.` (identical) |
-| Multi-events | `ev1E, ev2E :> body.` | `ev1E, ev2E :> body.` (identical) |
-| Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
+| Present event | Atomic (`en/1`) | Atomic (use in body of `:>`, `:<`, `when`) |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
+| Constraint | `cond :~ handler.` | `cond :~ handler.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |
 | Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical) |
 | Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical) |
@@ -1032,8 +1057,9 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Past lifetime | `past_event(ev, 60).` | `past_event(ev, 60).` (identical) |
 | Remember | `remember_event(ev, 3600).` | `remember_event(ev, 3600).` (identical) |
 | Remember limit | `remember_event_mod(ev, number(5), last).` | `remember_event_mod(ev, number(5), last).` (identical) |
-| Told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical) |
-| Tell | `tell(_, _, pattern) :- true.` | `tell(_, _, pattern) :- true.` (identical) |
+| Told | `told(_, pattern, pri) :- body.` | `told(_, pattern, pri) :- body.` (identical) |
+| Told (no priority) | `told(_, pattern) :- body.` | `told(_, pattern) :- body.` (identical) |
+| Tell | `tell(_, _, pattern) :- body.` | `tell(_, _, pattern) :- body.` (identical) |
 | Send message | `messageA(dest, send_message(content, Me))` | Same, or `send(dest, content)` |
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |

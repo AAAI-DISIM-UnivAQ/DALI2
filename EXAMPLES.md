@@ -306,10 +306,10 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI syntax** (`
 | Agent | Role | Features Demonstrated |
 |-------|------|----------------------|
 | `thermostat` | Temperature control | Internal events (interval, change, trigger, between), constraints, on_change |
-| `sensor` | Sensor readings | Periodic tasks, present events, learning, blackboard, past lifetime/remember |
-| `coordinator` | Central coordination | Tell/told (priority queue), FIPA messages, multi-events, goals, residue goals, export past rules, proposal sending, AI oracle |
+| `sensor` | Sensor readings | Periodic tasks, learning, blackboard, past lifetime/remember |
+| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events (delta-t), goals, residue goals, export past rules, proposal sending, AI oracle |
 | `logger` | Semantic logging | Ontology (inline + external file), helpers, condition monitor |
-| `worker` | Task execution | Action proposals (on_proposal), FIPA responses, export past rules, told rules |
+| `worker` | Task execution | Action proposals (on_proposal), FIPA responses, export past rules, told rules (body conditions) |
 
 ### Features Tested
 
@@ -323,12 +323,12 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI syntax** (`
 | 6 | **Periodic tasks** | sensor | Automatic — heartbeat every 15 seconds |
 | 7 | **Condition monitors** (`when`) | logger | Warns when log volume > 10 |
 | 8 | **Condition-action** (`:<`) | thermostat | Edge-triggered when cooling mode activates |
-| 9 | **Present events** | sensor | Blackboard data triggers environment observation |
-| 10 | **Multi-events** (`,` + `:>`) | coordinator | Both `sensor_data` + `alert` → fires |
+| 9 | **Present events** | — | Atomic observations (cannot be defined with `:-`) |
+| 10 | **Multi-events with delta-t** | coordinator | Both `sensor_data` + `alert` within 10s → fires |
 | 11 | **Constraints** | thermostat | Temperature > 50 triggers violation |
 | 12 | **Goals (achieve)** | sensor | Calibration goal keeps trying until achieved |
 | 13 | **Goals (test)** | coordinator | Tests if alerts received |
-| 14 | **Tell/told filtering** | coordinator | Only accepts specific patterns; rejects others |
+| 14 | **Tell/told filtering (body conditions)** | coordinator, worker | Accept/reject based on pattern + body conditions |
 | 15 | **Priority queue** | coordinator | Messages sorted by told priority (200→10) |
 | 16 | **FIPA confirm** | coordinator→worker | Inject `send_confirm(system_ok)` into coordinator |
 | 17 | **FIPA query_ref** | coordinator→worker | Inject `query_worker(status(_))` — auto-response |
@@ -361,8 +361,8 @@ Open http://localhost:8080 and use the **Send Event** panel. Steps 1–2 use "Se
 
 | Step | To | Content | Expected |
 |------|----|---------|----------|
-| 1 | `sensor` | `read_temp(85)` | Learning, blackboard, present event, cooling mode, constraint violation |
-| 2 | `sensor` | `read_temp(90)` | Learned pattern warning, multi-event fires |
+| 1 | `sensor` | `read_temp(85)` | Learning, blackboard, cooling mode, constraint violation |
+| 2 | `sensor` | `read_temp(90)` | Learned pattern warning, multi-event with delta-t fires |
 | 10 | `thermostat` | `update_temp(20)` | Constraint resolves, mode → idle |
 
 Steps 3–9 inject events directly into the coordinator (FIPA, export past, residue goals). Use curl or the REST API for these — see below.
@@ -378,7 +378,7 @@ Steps 3–9 inject events directly into the coordinator (FIPA, export past, resi
 
 ```powershell
 # STEP 1: Send first temperature reading
-# Triggers: learning, blackboard, present event, on_change, triggered internal,
+# Triggers: learning, blackboard, on_change, triggered internal,
 #           constraint, export past (on_past), change condition reset, priority queue
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(85)""}"
 ```
@@ -386,7 +386,6 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 **Expected:**
 - Sensor reads 85, writes to blackboard, sends `sensor_data(85)` to coordinator
 - **Learning**: learns overheating pattern
-- **Present event**: blackboard → thermostat gets `update_temp(85)`
 - **On_change**: "Cooling mode just activated" (edge-triggered, fires once)
 - **Triggered internal**: `cooling_monitor` starts firing (mode=cooling)
 - **Constraint violated**: 85 > 50 → emergency sent to coordinator
@@ -395,13 +394,13 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 - Logger receives log_event → **ontology** matching works
 
 ```powershell
-# STEP 2: Send second reading (triggers learned pattern + multi-event + export past)
+# STEP 2: Send second reading (triggers learned pattern + multi-event with delta-t + export past)
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(90)""}"
 ```
 
 **Expected:**
 - **Learned knowledge**: "WARNING: Previously learned overheating pattern!"
-- **Multi-event**: `sensor_data` + `alert` both in past → fires
+- **Multi-event with delta-t**: `sensor_data` + `alert` both in past within 10s → fires
 - **Export past (on_past)**: `alert` + `sensor_data` consumed from past memory
 
 ```powershell

@@ -265,7 +265,7 @@ prioritize_messages(Name, Messages, Sorted) :-
 assign_priorities(_, [], []).
 assign_priorities(Name, [Msg|Rest], [P-Msg|PRest]) :-
     Msg = message(_, Content, _),
-    (loader:agent_told(Name, Pattern, Priority),
+    (loader:agent_told(Name, Pattern, Priority, _),
      subsumes_term(Pattern, Content) ->
         P = Priority
     ;
@@ -597,11 +597,12 @@ process_present_events(Name) :-
 %% ============================================================
 
 %% process_multi_events(+Name) - Fire when all events in the list have past records
+%% Supports optional delta-t: events must have occurred within DeltaT seconds of each other.
 process_multi_events(Name) :-
     forall(
-        loader:agent_multi_event(Name, EventList, Body),
+        loader:agent_multi_event(Name, EventList, Body, DeltaT),
         (term_to_atom(EventList, MultiId),
-         (all_events_occurred(Name, EventList) ->
+         (all_events_occurred(Name, EventList, DeltaT) ->
             (agent_multi_fired(Name, MultiId) ->
                 true
             ;
@@ -618,10 +619,33 @@ process_multi_events(Name) :-
          ))
     ).
 
-all_events_occurred(_, []).
-all_events_occurred(Name, [Event|Rest]) :-
-    event_in_past(Name, Event),
-    all_events_occurred(Name, Rest).
+%% all_events_occurred(+Name, +EventList, +DeltaT)
+%% DeltaT = 0 means no time constraint (backward compatible).
+all_events_occurred(Name, EventList, DeltaT) :-
+    collect_event_timestamps(Name, EventList, Timestamps),
+    (DeltaT =:= 0 ->
+        true  % no time constraint
+    ;
+        DeltaTMs is DeltaT * 1000,
+        max_list(Timestamps, MaxT),
+        min_list(Timestamps, MinT),
+        Span is MaxT - MinT,
+        Span =< DeltaTMs
+    ).
+
+collect_event_timestamps(_, [], []).
+collect_event_timestamps(Name, [Event|Rest], [T|Ts]) :-
+    event_in_past_with_time(Name, Event, T),
+    collect_event_timestamps(Name, Rest, Ts).
+
+event_in_past_with_time(Name, Event, T) :-
+    agent_past_event(Name, received(Event, _), T, _), !.
+event_in_past_with_time(Name, Event, T) :-
+    agent_past_event(Name, injected(Event), T, _), !.
+event_in_past_with_time(Name, Event, T) :-
+    agent_past_event(Name, internal(Event), T, _), !.
+event_in_past_with_time(Name, Event, T) :-
+    agent_past_event(Name, Event, T, _), !.
 
 event_in_past(Name, Event) :-
     agent_past_event(Name, received(Event, _), _, _), !.
@@ -737,20 +761,22 @@ process_single_goal(Name, test, Goal, Plan) :-
 %% TELL/TOLD COMMUNICATION FILTERING
 %% ============================================================
 
-%% should_allow_send(+Sender, +Content) - Check sender's tell rules
+%% should_allow_send(+Sender, +Content) - Check sender's tell rules (with body conditions)
 should_allow_send(Sender, Content) :-
-    (   \+ loader:agent_tell(Sender, _)
+    (   \+ loader:agent_tell(Sender, _, _)
     ->  true
-    ;   loader:agent_tell(Sender, Pattern),
-        subsumes_term(Pattern, Content)
+    ;   loader:agent_tell(Sender, Pattern, Body),
+        subsumes_term(Pattern, Content),
+        (Body == true -> true ; catch(call_condition(Sender, Body), _, fail))
     ).
 
-%% should_allow_receive(+Receiver, +Content, -Priority) - Check receiver's told rules
+%% should_allow_receive(+Receiver, +Content, -Priority) - Check receiver's told rules (with body conditions)
 should_allow_receive(Receiver, Content, Priority) :-
-    (   \+ loader:agent_told(Receiver, _, _)
+    (   \+ loader:agent_told(Receiver, _, _, _)
     ->  Priority = 0
-    ;   loader:agent_told(Receiver, Pattern, Priority),
-        subsumes_term(Pattern, Content)
+    ;   loader:agent_told(Receiver, Pattern, Priority, Body),
+        subsumes_term(Pattern, Content),
+        (Body == true -> true ; catch(call_condition(Receiver, Body), _, fail))
     ).
 
 %% ============================================================
