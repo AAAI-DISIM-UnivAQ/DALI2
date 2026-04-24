@@ -12,6 +12,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      - ./web:/dali2/web
+      - ./src:/dali2/src
       - ./examples:/dali2/examples
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}

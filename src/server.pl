@@ -44,6 +44,7 @@ user:message_hook(_, informational, _) :- !.
 :- http_handler(root(api/blackboard),api_blackboard,[]).
 :- http_handler(root(api/source),    api_source,    []).
 :- http_handler(root(api/save),      api_save,      [method(post)]).
+:- http_handler(root(api/save_file), api_save_file, [method(post)]).
 :- http_handler(root(api/ai/status), api_ai_status, []).
 :- http_handler(root(api/ai/key),    api_ai_key,    [method(post)]).
 :- http_handler(root(api/ai/ask),    api_ai_ask,    [method(post)]).
@@ -440,10 +441,40 @@ api_save(Request) :-
         atom_string(Content, Dict.content),
         setup_call_cleanup(
             open(File, write, Stream),
-            write(Stream, Content),
+            format(Stream, '~a', [Content]),
             close(Stream)
         ),
         reply_json_dict(_{ok: true, message: "Saved"})
+    ;
+        reply_json_dict(_{ok: false, error: "No agent file loaded"})
+    ).
+
+%% POST /api/save_file - Save agent file with explicit filename
+%%   Body: {"filename": "path/to/file.pl", "content": "...source code..."}
+%%   Security: only allows saving to the current agent file.
+api_save_file(Request) :-
+    cors_enable,
+    http_read_json_dict(Request, Dict),
+    (atom(Dict.filename) -> Filename = Dict.filename ; atom_string(Filename, Dict.filename)),
+    (atom(Dict.content) -> Content = Dict.content ; atom_string(Content, Dict.content)),
+    (current_agent_file(CurrentFile), CurrentFile \= '' ->
+        %% Security: only allow saving to the current agent file
+        (Filename == CurrentFile ->
+            catch(
+                (setup_call_cleanup(
+                    open(Filename, write, Stream),
+                    format(Stream, '~a', [Content]),
+                    close(Stream)
+                ),
+                 reply_json_dict(_{ok: true, message: "File saved"}))
+            ,
+                Error,
+                (term_to_atom(Error, ErrAtom),
+                 reply_json_dict(_{ok: false, error: ErrAtom}))
+            )
+        ;
+            reply_json_dict(_{ok: false, error: "Cannot save to a different file than the loaded agent file"})
+        )
     ;
         reply_json_dict(_{ok: false, error: "No agent file loaded"})
     ).

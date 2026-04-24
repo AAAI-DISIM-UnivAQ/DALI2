@@ -27,6 +27,8 @@ services:
     ports:
       - "8081:8080"
     volumes:
+      - ./web:/dali2/web
+      - ./src:/dali2/src
       - ./examples:/dali2/examples
     environment:
       - DALI2_NODE=sensors
@@ -44,6 +46,8 @@ services:
     ports:
       - "8082:8080"
     volumes:
+      - ./web:/dali2/web
+      - ./src:/dali2/src
       - ./examples:/dali2/examples
     environment:
       - DALI2_NODE=responders

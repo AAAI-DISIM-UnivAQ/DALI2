@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="/static/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Monaco Editor -->
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/editor/editor.main.min.css">
 </head>
 <body>
     <header>
@@ -34,22 +36,34 @@
             </div>
         </aside>
 
-        <!-- Center: Logs -->
+        <!-- Center: Logs + File Editor -->
         <section id="logs-panel">
             <div class="panel-header">
-                <h2>Event Log</h2>
+                <div class="view-toggle">
+                    <button id="btn-view-logs" class="toggle-btn active" title="View event log">Log</button>
+                    <button id="btn-view-file" class="toggle-btn" title="Edit agent source file">File</button>
+                </div>
                 <div class="log-controls">
                     <select id="log-filter">
                         <option value="">All agents</option>
                     </select>
-                    <button id="btn-clear-logs" class="btn btn-small">Clear</button>
+                    <button id="btn-clear-logs" class="btn btn-primary">Clear</button>
                     <label class="toggle">
                         <input type="checkbox" id="auto-scroll" checked>
                         <span>Auto-scroll</span>
                     </label>
                 </div>
+                <div class="file-controls" style="display:none;">
+                    <span id="file-name" style="font-size: 0.85rem; flex: 1;"></span>
+                    <button id="btn-file-save" class="btn btn-primary" title="Save file (Ctrl+S)">Save</button>
+                </div>
             </div>
-            <div id="log-container"></div>
+            <div id="logs-view" style="flex: 1; overflow: hidden;">
+                <div id="log-container"></div>
+            </div>
+            <div id="file-view" style="display:none; overflow: hidden;">
+                <div id="monaco-editor" style="overflow: hidden;"></div>
+            </div>
         </section>
 
         <!-- Right panel: Actions + Info -->
@@ -156,6 +170,7 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

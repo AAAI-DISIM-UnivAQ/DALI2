@@ -4,6 +4,8 @@ const API = '';
 let lastLogTime = 0;
 let selectedAgent = '';
 let pollInterval = null;
+let monacoEditor = null;
+let currentAgentFile = '';
 
 // ============================================================
 // API Calls
@@ -52,6 +54,10 @@ const postReload = (file) => api('/api/reload', {
 
 const postSave = (content) => api('/api/save', {
     method: 'POST', body: JSON.stringify({ content })
+});
+
+const postSaveFile = (filename, content) => api('/api/save_file', {
+    method: 'POST', body: JSON.stringify({ filename, content })
 });
 
 // AI Oracle API
@@ -263,6 +269,135 @@ async function updateBlackboard() {
 }
 
 // ============================================================
+// View Toggle Functions (Log / File editor)
+// ============================================================
+
+function switchView(view) {
+    const logsView = document.getElementById('logs-view');
+    const fileView = document.getElementById('file-view');
+    const btnLogs = document.getElementById('btn-view-logs');
+    const btnFile = document.getElementById('btn-view-file');
+    const logControls = document.querySelector('.log-controls');
+    const fileControls = document.querySelector('.file-controls');
+
+    if (view === 'logs') {
+        logsView.style.display = 'block';
+        fileView.style.display = 'none';
+        btnLogs.classList.add('active');
+        btnFile.classList.remove('active');
+        logControls.style.display = 'flex';
+        fileControls.style.display = 'none';
+    } else {
+        logsView.style.display = 'none';
+        fileView.style.display = 'block';
+        btnLogs.classList.remove('active');
+        btnFile.classList.add('active');
+        logControls.style.display = 'none';
+        fileControls.style.display = 'flex';
+    }
+}
+
+async function loadFileView() {
+    const data = await getSource();
+    if (data && data.content) {
+        currentAgentFile = data.file || '';
+        document.getElementById('file-name').textContent = currentAgentFile || 'Untitled';
+
+        if (!monacoEditor) {
+            await initMonacoEditor(data.content);
+        } else {
+            monacoEditor.setValue(data.content);
+        }
+    }
+}
+
+async function preloadFileEditor() {
+    try {
+        const data = await getSource();
+        if (data && data.content) {
+            currentAgentFile = data.file || '';
+            document.getElementById('file-name').textContent = currentAgentFile || 'Untitled';
+            await initMonacoEditor(data.content);
+        }
+    } catch (e) {
+        console.error('Error preloading editor:', e);
+    }
+}
+
+function initMonacoEditor(content) {
+    return new Promise((resolve) => {
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+
+        require(['vs/editor/editor.main'], function() {
+            // Register DALI/Prolog language highlighting
+            monaco.languages.register({ id: 'prolog' });
+
+            monaco.languages.setMonarchTokensProvider('prolog', {
+                tokenizer: {
+                    root: [
+                        // Comments
+                        [/%.*/, 'comment'],
+                        [/\/\*/, 'comment', '@comment'],
+
+                        // Strings
+                        [/'([^'\\]|\\.)*'/, 'string'],
+                        [/"([^"\\]|\\.)*"/, 'string'],
+
+                        // DALI operators
+                        [/:>|:<|~\/|<\/|\?\/|:~/, 'operator'],
+                        [/:-|-->/, 'operator'],
+
+                        // Predicates and atoms (lowercase start or in quotes)
+                        [/[a-z_]\w*(?=\s*\()/, 'function'],
+                        [/[a-z_]\w*/, 'identifier'],
+
+                        // Variables (uppercase start or underscore)
+                        [/[A-Z_]\w*/, 'type'],
+
+                        // Numbers
+                        [/\d+\.\d+/, 'number'],
+                        [/\d+/, 'number'],
+
+                        // Operators and punctuation
+                        [/[(){}\[\],.|]/, 'delimiter'],
+                        [/[+\-*/=<>\\]/, 'operator'],
+                    ],
+                    comment: [
+                        [/[^*/]+/, 'comment'],
+                        [/\*\//, 'comment', '@pop'],
+                        [/[*/]/, 'comment'],
+                    ],
+                },
+            });
+
+            monacoEditor = monaco.editor.create(document.getElementById('monaco-editor'), {
+                value: content,
+                language: 'prolog',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: true },
+                fontSize: 13,
+                fontFamily: "'JetBrains Mono', Consolas, monospace",
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                tabSize: 4,
+                wordWrap: 'on',
+                formatOnPaste: true,
+                defaultFormatter: null,
+                padding: { bottom: 360 }
+            });
+
+            // Handle Ctrl+S for save
+            monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                document.getElementById('btn-file-save').click();
+            });
+
+            resolve(monacoEditor);
+        });
+    });
+}
+
+// ============================================================
 // Polling Loop
 // ============================================================
 
@@ -400,6 +535,44 @@ function init() {
         }
     });
 
+    // --- View Toggle (Logs vs File) ---
+    document.getElementById('btn-view-logs').addEventListener('click', () => {
+        switchView('logs');
+    });
+    document.getElementById('btn-view-file').addEventListener('click', () => {
+        switchView('file');
+        loadFileView();
+    });
+
+    // --- File Save ---
+    document.getElementById('btn-file-save').addEventListener('click', async () => {
+        if (!monacoEditor) return;
+        const content = monacoEditor.getValue();
+        const btnSave = document.getElementById('btn-file-save');
+        const originalText = btnSave.textContent;
+
+        btnSave.disabled = true;
+        btnSave.textContent = 'Saving...';
+
+        const result = await postSaveFile(currentAgentFile, content);
+
+        if (result && result.ok) {
+            btnSave.textContent = 'Saved!';
+            setTimeout(() => {
+                btnSave.textContent = originalText;
+                btnSave.disabled = false;
+            }, 1500);
+        } else {
+            const errorMsg = result ? (result.error || 'Unknown error') : 'No response';
+            console.error('Save error:', errorMsg);
+            btnSave.textContent = 'Save Failed';
+            setTimeout(() => {
+                btnSave.textContent = originalText;
+                btnSave.disabled = false;
+            }, 2000);
+        }
+    });
+
     // Start polling
     poll();
     pollInterval = setInterval(poll, 1500);
@@ -415,6 +588,9 @@ function init() {
     // Cluster status (Redis agent registry)
     updateCluster();
     setInterval(updateCluster, 5000);
+
+    // Preload Monaco editor in background (no await - runs silently)
+    preloadFileEditor();
 }
 
 async function updateAiStatus() {
