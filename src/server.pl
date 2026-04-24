@@ -524,9 +524,11 @@ api_ai_ask(Request) :-
             term_to_atom(Result, ResultAtom),
             reply_json_dict(_{ok: true, result: ResultAtom})
         ),
-        Error,
-        (term_to_atom(Error, ErrAtom),
-         reply_json_dict(_{ok: false, error: ErrAtom}))
+        ai_error(Detail),
+        (term_to_atom(Detail, DetailAtom),
+         atom_string(DetailAtom, DetailStr),
+         format(user_error, "[AI Ask] Error: ~w~n", [DetailStr]),
+         reply_json_dict(_{ok: false, error: DetailStr}))
     ).
 
 %% ============================================================

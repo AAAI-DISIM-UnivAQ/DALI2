@@ -12,6 +12,7 @@
 
 :- use_module(library(http/http_open)).
 :- use_module(library(http/http_client)).
+:- use_module(library(http/http_ssl_plugin)).   % Required for HTTPS
 :- use_module(library(json)).
 :- use_module(library(readutil)).
 
@@ -19,7 +20,7 @@
 :- dynamic ai_model/1.
 
 %% Default model (OpenRouter format — free tier)
-ai_model('openrouter/free').
+ai_model('google/gemma-4-31b-it:free').
 
 %% ============================================================
 %% CONFIGURATION
@@ -68,11 +69,11 @@ ask_ai(Context, SystemPrompt, PrologFact) :-
             ask_ai_impl(Context, SystemPrompt, PrologFact),
             Error,
             (format(user_error, "[AI Oracle] Error: ~w~n", [Error]),
-             PrologFact = error(api_failure))
+             throw(ai_error(Error)))
         )
     ;
-        format(user_error, "[AI Oracle] No API key configured, returning default~n", []),
-        PrologFact = suggestion(no_ai_available)
+        format(user_error, "[AI Oracle] No API key configured~n", []),
+        throw(ai_error(no_api_key))
     ).
 
 %% ============================================================
@@ -100,8 +101,10 @@ ask_ai_impl(Context, SystemPrompt, PrologFact) :-
         max_tokens: 100,
         temperature: 0.3
     },
-    %% Serialize to JSON string
-    with_output_to(string(JsonStr), json_write_dict(current_output, Body, [])),
+    %% Serialize to JSON atom (atom/2 is the most portable post form)
+    with_output_to(atom(JsonAtom), json_write_dict(current_output, Body, [])),
+    atom_length(JsonAtom, JsonLen),
+    format(user_error, "[AI Oracle] Request to ~w (~w chars)~n", [Model, JsonLen]),
     %% Make HTTP request to OpenRouter
     atom_concat('Bearer ', ApiKey, AuthValue),
     setup_call_cleanup(
@@ -109,24 +112,26 @@ ask_ai_impl(Context, SystemPrompt, PrologFact) :-
             'https://openrouter.ai/api/v1/chat/completions',
             ResponseStream,
             [
-                method(post),
                 request_header('Authorization' = AuthValue),
-                post(string('application/json', JsonStr)),
-                status_code(StatusCode)
+                request_header('Content-Type' = 'application/json'),
+                post(atom('application/json', JsonAtom)),
+                status_code(StatusCode),
+                timeout(30)
             ]
         ),
         (   StatusCode =:= 200 ->
             json_read_dict(ResponseStream, ResponseDict),
+            format(user_error, "[AI Oracle] Response received (status 200)~n", []),
             (extract_content(ResponseDict, ContentText) ->
                 (parse_prolog_fact(ContentText, PrologFact) -> true
                 ; PrologFact = raw_response(ContentText))
             ;
-                PrologFact = error(empty_response)
+                throw(ai_error(empty_response))
             )
         ;
             read_string(ResponseStream, _, ErrorBody),
-            format(user_error, "[AI Oracle] API returned status ~w: ~w~n", [StatusCode, ErrorBody]),
-            PrologFact = error(api_status(StatusCode))
+            format(user_error, "[AI Oracle] API status ~w: ~w~n", [StatusCode, ErrorBody]),
+            throw(ai_error(api_status(StatusCode, ErrorBody)))
         ),
         close(ResponseStream)
     ).

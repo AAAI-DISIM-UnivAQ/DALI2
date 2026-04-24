@@ -3,6 +3,9 @@ FROM swipl:stable
 USER root
 WORKDIR /dali2
 
+# CA certificates needed for HTTPS calls (e.g. OpenRouter AI Oracle)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 # library(redis) is built into SWI-Prolog >= 8.3 — no pack install needed
 
 # Copy source and web files
