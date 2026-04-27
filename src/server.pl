@@ -177,7 +177,7 @@ api_status(_Request) :-
     length(Agents, Count),
     (current_agent_file(F) -> File = F ; File = ''),
     (ai_oracle:ai_available -> AI = true ; AI = false),
-    (ai_oracle:ai_model(Model) -> true ; Model = 'none'),
+    (ai_oracle:get_ai_model(Model) -> true ; Model = 'none'),
     (node_name_setting(NodeName) -> true ; NodeName = standalone),
     (redis_comm:redis_connected -> Redis = true ; Redis = false),
     redis_comm:redis_registered_agents(AllAgents),
@@ -487,7 +487,7 @@ api_save_file(Request) :-
 api_ai_status(_Request) :-
     cors_enable,
     (ai_oracle:ai_available -> Enabled = true ; Enabled = false),
-    (ai_oracle:ai_model(Model) -> true ; Model = 'none'),
+    (ai_oracle:get_ai_model(Model) -> true ; Model = 'none'),
     reply_json_dict(_{enabled: Enabled, model: Model}).
 
 %% POST /api/ai/key - Set the OpenRouter API key at runtime

@@ -41,7 +41,9 @@
     redis_unregister_agent/2,    % redis_unregister_agent(+Node, +AgentName)
     redis_registered_agents/1,   % redis_registered_agents(-AgentList)
     redis_node_agents/2,         % redis_node_agents(+Node, -AgentList)
-    redis_connected/0
+    redis_connected/0,
+    redis_set_config/2,          % redis_set_config(+Key, +Value)
+    redis_get_config/2           % redis_get_config(+Key, -Value)
 ]).
 
 :- use_module(library(redis)).
@@ -337,6 +339,30 @@ redis_node_agents(Node, AgentList) :-
     findall(Name,
         member(agent_info(Node, Name), AllAgents),
         AgentList).
+
+%% ============================================================
+%% CONFIG KEY-VALUE — shared AI settings (key, model)
+%% Uses simple Redis GET/SET so all processes see the same config.
+%% ============================================================
+
+%% redis_set_config(+Key, +Value) — Store a config value
+redis_set_config(Key, Value) :-
+    (redis_is_connected ->
+        catch(
+            redis(dali2_redis, set(Key, Value), _),
+            _Error, true
+        )
+    ; true).
+
+%% redis_get_config(+Key, -Value) — Retrieve a config value
+redis_get_config(Key, Value) :-
+    redis_is_connected,
+    catch(
+        redis(dali2_redis, get(Key), RawValue),
+        _, fail
+    ),
+    RawValue \== nil,
+    atom_string(Value, RawValue).
 
 %% parse_agent_entry(+Entry, -Node, -Name)
 parse_agent_entry(Entry, Node, Name) :-

@@ -7,7 +7,9 @@
     ask_ai/3,           % ask_ai(+Context, +SystemPrompt, -PrologFact)
     ai_available/0,     % Check if AI oracle is configured
     set_ai_key/1,       % set_ai_key(+Key) - set API key at runtime
-    set_ai_model/1      % set_ai_model(+Model) - set model at runtime
+    set_ai_model/1,     % set_ai_model(+Model) - set model at runtime
+    get_ai_key/1,       % get_ai_key(-Key) - get current key (Redis first, then local)
+    get_ai_model/1      % get_ai_model(-Model) - get current model (Redis first, then local)
 ]).
 
 :- use_module(library(http/http_open)).
@@ -15,6 +17,7 @@
 :- use_module(library(http/http_ssl_plugin)).   % Required for HTTPS
 :- use_module(library(json)).
 :- use_module(library(readutil)).
+:- use_module(redis_comm).
 
 :- dynamic ai_api_key/1.
 :- dynamic ai_model/1.
@@ -32,18 +35,36 @@ ai_model('google/gemma-4-31b-it:free').
     ; true).
 
 %% set_ai_key(+Key) - Set or update the API key at runtime
+%%   Also writes to Redis so all agent processes see the change.
 set_ai_key(Key) :-
     retractall(ai_api_key(_)),
-    assert(ai_api_key(Key)).
+    assert(ai_api_key(Key)),
+    catch(redis_comm:redis_set_config('DALI2:ai_key', Key), _, true).
 
 %% set_ai_model(+Model) - Set or update the model
+%%   Also writes to Redis so all agent processes see the change.
 set_ai_model(Model) :-
     retractall(ai_model(_)),
-    assert(ai_model(Model)).
+    assert(ai_model(Model)),
+    catch(redis_comm:redis_set_config('DALI2:ai_model', Model), _, true).
+
+%% get_ai_key(-Key) - Get current API key: Redis (shared) first, then local
+get_ai_key(Key) :-
+    (catch(redis_comm:redis_get_config('DALI2:ai_key', K), _, fail) ->
+        Key = K
+    ; ai_api_key(Key)
+    ).
+
+%% get_ai_model(-Model) - Get current model: Redis (shared) first, then local
+get_ai_model(Model) :-
+    (catch(redis_comm:redis_get_config('DALI2:ai_model', M), _, fail) ->
+        Model = M
+    ; ai_model(Model)
+    ).
 
 %% ai_available/0 - True if an API key is configured
 ai_available :-
-    ai_api_key(Key),
+    get_ai_key(Key),
     Key \= ''.
 
 %% ============================================================
@@ -86,8 +107,8 @@ to_string(Term, Str) :-
      term_to_atom(Term, A), atom_string(A, Str)).
 
 ask_ai_impl(Context, SystemPrompt, PrologFact) :-
-    ai_api_key(ApiKey),
-    ai_model(Model),
+    get_ai_key(ApiKey),
+    get_ai_model(Model),
     to_string(Context, ContextStr),
     to_string(SystemPrompt, SysStr),
     to_string(Model, ModelStr),
