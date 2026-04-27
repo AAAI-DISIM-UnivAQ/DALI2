@@ -94,18 +94,6 @@ set_node_name(NodeName) :-
 get_node_name(NodeName) :-
     (node_name_setting(N) -> NodeName = N ; NodeName = standalone).
 
-%% agent_process_script(-Path) - Absolute path to src/agent_process.pl,
-%% computed from engine.pl's own source location. Cached on first use.
-:- dynamic agent_process_script_cache/1.
-agent_process_script(Path) :-
-    (   agent_process_script_cache(Path0)
-    ->  Path = Path0
-    ;   source_file(engine:start_agent(_), EngineFile),
-        file_directory_name(EngineFile, SrcDir),
-        directory_file_path(SrcDir, 'agent_process.pl', Path),
-        assert(agent_process_script_cache(Path))
-    ).
-
 %% start_agent(+Name) - Start a single agent as a separate OS process
 %%   Communication goes via Redis (LINDA channel).
 start_agent(Name) :-
@@ -119,16 +107,11 @@ start_agent(Name) :-
         get_node_name(NodeName),
         catch(redis_comm:redis_register_agent(NodeName, Name), _, true),
         get_agent_file(AgentFile),
-        %% Spawn separate swipl process — only needs agent name and file.
-        %% Resolve agent_process.pl from this module's own source location
-        %% (rather than a cwd-relative path) so the server works no matter
-        %% which directory it was launched from.
-        agent_process_script(AgentProcScript),
-        absolute_file_name(AgentFile, AbsAgentFile),
+        %% Spawn separate swipl process — only needs agent name and file
         process_create(
             path(swipl),
-            ['-l', AgentProcScript, '-g', 'agent_main', '-t', 'halt',
-             '--', Name, AbsAgentFile],
+            ['-l', 'src/agent_process.pl', '-g', 'agent_main', '-t', 'halt',
+             '--', Name, AgentFile],
             [process(Pid), detached(true),
              stdout(pipe(_StdOut)), stderr(std)]
         ),
