@@ -107,10 +107,13 @@ start_agent(Name) :-
         get_node_name(NodeName),
         catch(redis_comm:redis_register_agent(NodeName, Name), _, true),
         get_agent_file(AgentFile),
+        %% Compute absolute path to agent_process.pl from engine.pl's location
+        engine_src_dir(SrcDir),
+        atom_concat(SrcDir, '/agent_process.pl', AgentProcessPath),
         %% Spawn separate swipl process — only needs agent name and file
         process_create(
             path(swipl),
-            ['-l', 'src/agent_process.pl', '-g', 'agent_main', '-t', 'halt',
+            ['-l', AgentProcessPath, '-g', 'agent_main', '-t', 'halt',
              '--', Name, AgentFile],
             [process(Pid), detached(true),
              stdout(pipe(_StdOut)), stderr(std)]
@@ -183,14 +186,24 @@ all_logs(Entries) :-
 %% ============================================================
 
 
+%% engine_src_dir(-Dir) - Get the src directory where engine.pl lives
+engine_src_dir(Dir) :-
+    source_file(engine:start_all, File),
+    file_directory_name(File, Dir).
+
 %% get_agent_file(-File) - Get the current agent file path
 get_agent_file(File) :-
     (agent_file_setting(F) -> File = F ; File = '').
 
-%% set_agent_file(+File) - Set the current agent file path
+%% set_agent_file(+File) - Set the current agent file path (stores as absolute)
 set_agent_file(File) :-
     retractall(agent_file_setting(_)),
-    assert(agent_file_setting(File)).
+    (is_absolute_file_name(File) ->
+        assert(agent_file_setting(File))
+    ;
+        absolute_file_name(File, Abs),
+        assert(agent_file_setting(Abs))
+    ).
 
 
 %% ============================================================
