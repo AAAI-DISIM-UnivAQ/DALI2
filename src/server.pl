@@ -70,6 +70,8 @@ main :-
     engine:set_node_name(NodeName),
     %% Initialize Redis connection (master also connects for inject/send from web UI)
     catch(redis_comm:redis_init, _, format("WARNING: Redis not available~n")),
+    %% Sync local AI config to Redis (clears stale keys from previous sessions)
+    catch(ai_oracle:ai_sync_redis, _, true),
     %% Subscribe to LOGS channel so agent log entries appear in the web UI
     catch(redis_comm:redis_subscribe_logs, _, true),
     (AgentFile \= '' ->

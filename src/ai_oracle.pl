@@ -15,7 +15,8 @@
     set_vision_endpoint/1, % set_vision_endpoint(+URL) - set vision LLM endpoint
     set_vision_model/1, % set_vision_model(+Model) - set vision model
     get_ai_key/1,       % get_ai_key(-Key) - get current key (Redis first, then local)
-    get_ai_model/1      % get_ai_model(-Model) - get current model (Redis first, then local)
+    get_ai_model/1,     % get_ai_model(-Model) - get current model (Redis first, then local)
+    ai_sync_redis/0     % ai_sync_redis - sync local AI config to Redis (clear stale keys)
 ]).
 
 :- use_module(library(http/http_open)).
@@ -126,6 +127,28 @@ get_ai_endpoint(E) :-
         E = V
     ; ai_endpoint(E)
     ).
+
+%% ai_sync_redis/0 - Sync local AI config to Redis at platform startup.
+%%   Clears stale keys/models/endpoints from previous sessions so that
+%%   ai_available reflects the current session's state.
+ai_sync_redis :-
+    (ai_api_key(K) ->
+        catch(redis_comm:redis_set_config('DALI2:ai_key', K), _, true)
+    ;
+        catch(redis_comm:redis_set_config('DALI2:ai_key', ''), _, true)
+    ),
+    (ai_model(M) ->
+        catch(redis_comm:redis_set_config('DALI2:ai_model', M), _, true)
+    ; true),
+    (ai_endpoint(E) ->
+        catch(redis_comm:redis_set_config('DALI2:ai_endpoint', E), _, true)
+    ; true),
+    (vision_endpoint(VE) ->
+        catch(redis_comm:redis_set_config('DALI2:vision_endpoint', VE), _, true)
+    ; true),
+    (vision_model(VM) ->
+        catch(redis_comm:redis_set_config('DALI2:vision_model', VM), _, true)
+    ; true).
 
 %% ============================================================
 %% MAIN PREDICATES
