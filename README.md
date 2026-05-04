@@ -407,15 +407,15 @@ Apache License 2.0
 
 To cite our work, please use this information:
 
-> AAAI-DISIM-UnivAQ. (2026). *AAAI-DISIM-UnivAQ/DALI2: Enable image vision capabilities via VLM* (v2026.05). Zenodo. https://doi.org/10.5281/zenodo.20026063
+> AAAI-DISIM-UnivAQ. (2026). *AAAI-DISIM-UnivAQ/DALI2* (v2026.05). Zenodo. https://doi.org/10.5281/zenodo.19858727
 
 ```bibtex
 @software{dali2zenodo,
   author       = {AAAI-DISIM-UnivAQ},
-  title        = {{AAAI-DISIM-UnivAQ/DALI2: Enable image vision capabilities via VLM}},
+  title        = {{AAAI-DISIM-UnivAQ/DALI2}},
   year         = {2026},
   publisher    = {Zenodo},
   version      = {v2026.05},
-  doi          = {10.5281/zenodo.20026063},
-  url          = {[https://doi.org/10.5281/zenodo.20026063](https://doi.org/10.5281/zenodo.20026063)}
+  doi          = {10.5281/zenodo.19858727},
+  url          = {[https://doi.org/10.5281/zenodo.19858727](https://doi.org/10.5281/zenodo.19858727)}
 }
