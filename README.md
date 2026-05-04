@@ -402,3 +402,20 @@ The web interface at `http://localhost:8080` provides:
 ## License
 
 Apache License 2.0
+
+## References
+
+To cite our work, please use this information:
+
+> AAAI-DISIM-UnivAQ. (2026). *AAAI-DISIM-UnivAQ/DALI2: Enable image vision capabilities via VLM* (v2026.05). Zenodo. https://doi.org/10.5281/zenodo.19858728
+
+```bibtex
+@software{dali2zenodo,
+  author       = {AAAI-DISIM-UnivAQ},
+  title        = {{AAAI-DISIM-UnivAQ/DALI2: Enable image vision capabilities via VLM}},
+  year         = {2026},
+  publisher    = {Zenodo},
+  version      = {v2026.05},
+  doi          = {10.5281/zenodo.19858728},
+  url          = {[https://doi.org/10.5281/zenodo.19858728](https://doi.org/10.5281/zenodo.19858728)}
+}
