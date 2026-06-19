@@ -8,9 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 # library(redis) is built into SWI-Prolog >= 8.3 — no pack install needed
 
-# Copy source and web files
+# Copy source, web, examples, and docs
 COPY src/ src/
 COPY web/ web/
+COPY examples/ examples/
+COPY README.md RULES.md EXAMPLES.md ./
 
 # Ensure all files are readable
 RUN chmod -R a+r /dali2

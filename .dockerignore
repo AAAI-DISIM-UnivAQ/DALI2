@@ -1,0 +1,10 @@
+.git
+.gitignore
+*.log
+.DS_Store
+.idea/
+__pycache__/
+slides/
+docker-compose*.yml
+run.bat
+DALI_vs_DALI2_analysis.md
