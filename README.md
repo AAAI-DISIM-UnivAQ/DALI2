@@ -213,11 +213,12 @@ alarmE(Type, Location) :>
     assert_belief(active(Type, Location)),
     messageA(responder, send_message(dispatch(Type, Location), my_agent)).
 
-%% Internal event (I suffix + :> operator + internal_event/5)
+%% Internal event (I suffix + :> operator)
+%% internal_event/5 is optional (DALI2 extension) — without it, defaults apply
 check_statusI :>
     believes(active(Type, Location)),
     log("Still active: ~w at ~w", [Type, Location]).
-internal_event(check_status, 5, forever, true, forever).
+internal_event(check_status, 5, forever, true, forever).  %% DALI2 extension
 
 %% Condition-action rule (?> operator, edge-triggered — DALI2 extension)
 believes(active(_, _)) ?>
@@ -375,7 +376,7 @@ The web interface at `http://localhost:8080` provides:
 | Docker setup | Complex (SICStus install) | Simple (swipl base image) |
 | Event syntax | `eventE(X) :> body.` | `eventE(X) :> body.` (identical!) |
 | Message sending | `messageA(dest, send_message(ev(X), Me))` | Same, or `send(dest, ev(X))` |
-| Internal events | `eventI :> body.` + `internal_event/5` | `eventI :> body.` + `internal_event/5` (identical!) |
+| Internal events | `eventI :> body.` (config auto-generated) | `eventI :> body.` + optional `internal_event/5` (DALI2 extension) |
 | Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
 | FIPA messages | `confirm`/`disconfirm`/`propose`/`query_ref` + 8 others | `send(to, confirm(fact))` — 4 with special semantics, rest as handlers |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
@@ -419,3 +420,30 @@ To cite our work, please use this information:
   doi          = {10.5281/zenodo.19858727},
   url          = {https://doi.org/10.5281/zenodo.19858727}
 }
+```
+
+### DALI original references
+
+- **DALI 1.0 original website** (no longer active): <http://www.di.univaq.it/stefcost/Sito-Web-DALI/WEB-DALI>
+
+- COSTANTINI, Stefania. *The DALI Agent-Oriented Logic Programming Language: Summary and References.* 2015.
+
+- COSTANTINI S., TOCCHIO A. *A logic programming language for multi-agent systems.* In: Logics in Artificial Intelligence, Springer Berlin Heidelberg, 2002, pp. 1–13.
+
+- COSTANTINI S., TOCCHIO A. *The DALI logic programming agent-oriented language.* In: Logics in Artificial Intelligence, Springer Berlin Heidelberg, 2004, pp. 685–688.
+
+- COSTANTINI S., TOCCHIO A. *DALI: An Architecture for Intelligent Logical Agents.* In: AAAI Spring Symposium: Emotion, Personality, and Social Behavior, 2008, pp. 13–18.
+
+- BEVAR V., COSTANTINI S., TOCCHIO A., DE GASPERIS G. *A multi-agent system for industrial fault detection and repair.* In: Advances on Practical Applications of Agents and Multi-Agent Systems, Springer Berlin Heidelberg, 2012, pp. 47–55.
+
+- DE GASPERIS G., BEVAR V., COSTANTINI S., TOCCHIO A., PAOLUCCI A. *Demonstrator of a multi-agent system for industrial fault detection and repair.* In: Advances on Practical Applications of Agents and Multi-Agent Systems, Springer Berlin Heidelberg, 2012, pp. 237–240.
+
+- DE GASPERIS, Giovanni. *DETF 1st Release (Version 14.08a).* Zenodo, 2014. DOI: 10.5281/zenodo.10683 (August 6, 2014).
+
+- COSTANTINI, Stefania; DE GASPERIS, Giovanni; NAZZICONE, Giulio. *DALI for cognitive robotics: principles and prototype implementation.* In: International Symposium on Practical Aspects of Declarative Languages, Springer, Cham, 2017, pp. 152–162.
+
+- COSTANTINI, Stefania; DE GASPERIS, Giovanni; PITONI, Valentina; SALUTARI, Agnese. *DALI: A multi agent system framework for the web, cognitive robotic and complex event processing.* CILC 2017, 32nd Italian Conference on Computational Logic, 26–28 September 2017, Naples, Italy.
+
+- RAFANELLI, Andrea; COSTANTINI, Stefania; DE GASPERIS, Giovanni. *A Multi-Agent-System framework for flooding events.* WOA 2022, 23rd Workshop From Objects to Agents, 1–2 September 2022, Genova, Italy.
+
+- COSTANTINI, Stefania. *Ensuring trustworthy and ethical behaviour in intelligent logical agents.* Journal of Logic and Computation, 2022, 32(2): 443–478.
