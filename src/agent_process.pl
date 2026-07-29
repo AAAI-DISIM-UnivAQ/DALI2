@@ -532,7 +532,44 @@ process_past_lifetime_local(Name) :-
     findall(pe(Ev, T, S), agent_past_event(Ev, T, S), PastList),
     check_past_expirations_local(Name, PastList, NowMs),
     findall(re(Ev, T, S), agent_remember_ev(Ev, T, S), RemList),
-    check_remember_expirations_local(Name, RemList, NowMs).
+    check_remember_expirations_local(Name, RemList, NowMs),
+    enforce_remember_limits_local(Name).
+
+%% enforce_remember_limits_local(+Name) - Keep only N remember events per pattern
+enforce_remember_limits_local(Name) :-
+    forall(
+        loader:agent_remember_limit(Name, Pattern, N, Mode),
+        enforce_single_limit_local(Pattern, N, Mode)
+    ).
+
+enforce_single_limit_local(Pattern, N, Mode) :-
+    findall(re(Ev, T, S),
+        (agent_remember_ev(Ev, T, S), unwrap_event_content_local(Ev, C), subsumes_term(Pattern, C)),
+        All),
+    length(All, Len),
+    (Len > N ->
+        (Mode == last ->
+            sort(2, @=<, All, Sorted),  % oldest first
+            Remove is Len - N,
+            take_n_local(Sorted, Remove, ToRemove)
+        ;
+            sort(2, @>=, All, Sorted),  % newest first
+            Remove is Len - N,
+            take_n_local(Sorted, Remove, ToRemove)
+        ),
+        remove_remember_entries_local(ToRemove)
+    ;
+        true
+    ).
+
+take_n_local(_, 0, []) :- !.
+take_n_local([], _, []) :- !.
+take_n_local([H|T], N, [H|R]) :- N > 0, N1 is N - 1, take_n_local(T, N1, R).
+
+remove_remember_entries_local([]).
+remove_remember_entries_local([re(Ev, T, S)|Rest]) :-
+    retract(agent_remember_ev(Ev, T, S)),
+    remove_remember_entries_local(Rest).
 
 check_past_expirations_local(_, [], _).
 check_past_expirations_local(Name, [pe(Ev, T, S)|Rest], NowMs) :-
@@ -920,6 +957,12 @@ ontology_match_local(Name, Term1, Term2) :-
     functor(Term1, F1, A), functor(Term2, F2, A),
     (loader:agent_ontology(Name, eq_property(F1, F2)) ;
      loader:agent_ontology(Name, eq_property(F2, F1))),
+    Term1 =.. [F1|Args1], Term2 =.. [F2|Args2],
+    maplist(=, Args1, Args2), !.
+ontology_match_local(Name, Term1, Term2) :-
+    functor(Term1, F1, A), functor(Term2, F2, A),
+    (loader:agent_ontology(Name, eq_class(F1, F2)) ;
+     loader:agent_ontology(Name, eq_class(F2, F1))),
     Term1 =.. [F1|Args1], Term2 =.. [F2|Args2],
     maplist(=, Args1, Args2), !.
 ontology_match_local(Name, Term1, Term2) :-

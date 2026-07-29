@@ -377,7 +377,7 @@ The web interface at `http://localhost:8080` provides:
 | Message sending | `messageA(dest, send_message(ev(X), Me))` | Same, or `send(dest, ev(X))` |
 | Internal events | `eventI :> body.` + `internal_event/5` | `eventI :> body.` + `internal_event/5` (identical!) |
 | Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
-| FIPA messages | `confirm`/`disconfirm`/`propose`/`query_ref` | `send(to, confirm(fact))` — full FIPA-ACL |
+| FIPA messages | `confirm`/`disconfirm`/`propose`/`query_ref` + 8 others | `send(to, confirm(fact))` — 4 with special semantics, rest as handlers |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
@@ -388,8 +388,8 @@ The web interface at `http://localhost:8080` provides:
 | Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical!) |
 | Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical!) |
 | Residue goals | `tenta_residuo(goal)` | `tenta_residuo(goal)` or `achieve(goal)` |
-| Present events | `condN :- body.` | `condN :- body.` (identical!) |
-| Multi-events | `ev1E, ev2E :> body.` | `ev1E, ev2E :> body.` (identical!) |
+| Present events | Atomic (`en/1`) | Atomic (use in body of `:>`, `?>`, `when`) |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
 | Constraints | `:~ constraint.` | `:~ constraint.` (identical!) |
 | Ontologies | `meta/3` + OWL files | `ontology(same_as(a,b)).` + `ontology_file` |
 | Learning | `learning.pl` + constraints | `learn_from(event, outcome) :- body.` |

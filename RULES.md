@@ -12,7 +12,7 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Agent declaration | `:- agent(name, [options]).` | DALI2 |
 | External event | `eventE(X) :> body.` | DALI |
 | Internal event | `eventI(X) :> body.` | DALI |
-| Internal config | `internal_event(ev, 3, forever, true, stop).` | DALI |
+| Internal config | `internal_event(ev, 3, forever, true, until_cond(past(ev))).` | DALI |
 | Action definition | `actionA(X) :- body.` | DALI |
 | Action preconditions | `actionA :< preconditions.` | DALI |
 | Present event | `condN` (atomic, body only) | DALI |

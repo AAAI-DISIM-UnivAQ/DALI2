@@ -305,7 +305,7 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible 
 
 | Agent | Role | Features Demonstrated |
 |-------|------|----------------------|
-| `thermostat` | Temperature control | Internal events (interval, change, trigger, between), constraints, on_change |
+| `thermostat` | Temperature control | Internal events (interval, change, trigger, between), constraints, condition-action (`?>`) |
 | `sensor` | Sensor readings | Periodic tasks, learning, blackboard, past lifetime/remember |
 | `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events (delta-t), goals, residue goals, export past rules, proposal sending, AI oracle |
 | `logger` | Semantic logging | Ontology (inline + external file), helpers, condition monitor |
@@ -378,8 +378,8 @@ Steps 3–9 inject events directly into the coordinator (FIPA, export past, resi
 
 ```powershell
 # STEP 1: Send first temperature reading
-# Triggers: learning, blackboard, on_change, triggered internal,
-#           constraint, export past (on_past), change condition reset, priority queue
+# Triggers: learning, blackboard, condition-action (?>), triggered internal,
+#           constraint, export past (~/), change condition reset, priority queue
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(85)""}"
 ```
 
@@ -401,7 +401,7 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 **Expected:**
 - **Learned knowledge**: "WARNING: Previously learned overheating pattern!"
 - **Multi-event with delta-t**: `sensor_data` + `alert` both in past within 10s → fires
-- **Export past (on_past)**: `alert` + `sensor_data` consumed from past memory
+- **Export past (`~/`)**: `alert` + `sensor_data` consumed from past memory
 
 ```powershell
 # STEP 3: Test FIPA confirm — coordinator sends confirm to worker
