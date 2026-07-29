@@ -7,27 +7,28 @@ DALI2 uses **DALI-compatible syntax** — the same operators and suffixes as the
 
 DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each `:- agent(name).` directive sets the context for all subsequent rules until the next agent declaration.
 
-| Construct | Syntax (identical to DALI) |
-|-----------|---------------------------|
-| Agent declaration | `:- agent(name, [options]).` |
-| External event | `eventE(X) :> body.` |
-| Internal event | `eventI(X) :> body.` |
-| Internal config | `internal_event(ev, 3, forever, true, stop).` |
-| Action definition | `actionA(X) :- body.` |
-| Present event | `condN` (atomic, body only) |
-| Condition-action | `cond :< action.` |
-| Export past | `head ~/ past1, past2.` |
-| Export past (not done) | `head </ past1, past2.` |
-| Export past (done) | `head ?/ past1, past2.` |
-| Constraint | `:~ condition.` |
-| Past lifetime | `past_event(ev, 60).` |
-| Remember | `remember_event(ev, 3600).` |
-| Remember limit | `remember_event_mod(ev, number(5), last).` |
-| Obtain goal | `obt_goal(goal) :- plan.` |
-| Test goal | `test_goal(goal) :- plan.` |
-| Told rule | `told(_, pattern, priority) :- body.` |
-| Told rule (no priority) | `told(_, pattern) :- body.` |
-| Tell rule | `tell(_, _, pattern) :- body.` |
+| Construct | Syntax | Source |
+|-----------|--------|--------|
+| Agent declaration | `:- agent(name, [options]).` | DALI2 |
+| External event | `eventE(X) :> body.` | DALI |
+| Internal event | `eventI(X) :> body.` | DALI |
+| Internal config | `internal_event(ev, 3, forever, true, stop).` | DALI |
+| Action definition | `actionA(X) :- body.` | DALI |
+| Action preconditions | `actionA :< preconditions.` | DALI |
+| Present event | `condN` (atomic, body only) | DALI |
+| Condition-action (edge-triggered) | `cond ?> action.` | DALI2 |
+| Export past | `head ~/ past1, past2.` | DALI |
+| Export past (not done) | `head </ past1, past2.` | DALI |
+| Export past (done) | `head ?/ past1, past2.` | DALI |
+| Constraint | `:~ condition.` | DALI |
+| Past lifetime | `past_event(ev, 60).` | DALI |
+| Remember | `remember_event(ev, 3600).` | DALI |
+| Remember limit | `remember_event_mod(ev, number(5), last).` | DALI |
+| Obtain goal | `obt_goal(goal) :- plan.` | DALI |
+| Test goal | `test_goal(goal) :- plan.` | DALI |
+| Told rule | `told(_, pattern, priority) :- body.` | DALI |
+| Told rule (no priority) | `told(_, pattern) :- body.` | DALI |
+| Tell rule | `tell(_, _, pattern) :- body.` | DALI |
 | Message sending | `messageA(dest, send_message(content, Me))` |
 | Past check | `evp(event)` or `eventP(args)` |
 | Residue goal | `tenta_residuo(goal)` |
@@ -51,7 +52,7 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 - [Internal Events (`:>` + `I` suffix)](#internal-events)
 - [Periodic Tasks (`every`)](#periodic-tasks)
 - [Condition Monitors (`when`)](#condition-monitors)
-- [Condition-Action Rules (`:<`)](#condition-action-rules)
+- [Condition-Action Rules (`?>`)](#condition-action-rules)
 - [Present/Environment Events (`N` suffix)](#presentenvironment-events)
 - [Multi-Events (conjunction)](#multi-events)
 - [Constraints (`:~`)](#constraints)
@@ -265,16 +266,18 @@ when(has_past(intrusion_detected)) :-
 **Syntax:**
 
 ```prolog
-Condition :< Action.
+Condition ?> Action.
 ```
+
+The `?>` operator is a **DALI2 extension** — it reads as "if condition, then action". It is distinct from `:<` (which is DALI's action-precondition operator, see [Actions](#actions)).
 
 **Examples:**
 
 ```prolog
 :- agent(thermostat, [cycle(2)]).
 
-%% Fire once when cooling mode activates (DALI :< syntax)
-believes(mode(cooling)) :< (
+%% Fire once when cooling mode activates (DALI2 ?> syntax)
+believes(mode(cooling)) ?> (
     log("Cooling mode just activated"),
     send(logger, log_event(mode_change, thermostat, cooling))
 ).
@@ -282,7 +285,7 @@ believes(mode(cooling)) :< (
 :- agent(robot, [cycle(1)]).
 
 %% Fire once when battery becomes low
-believes(battery_level(L)), L < 20 :< (
+believes(battery_level(L)), L < 20 ?> (
     log("Battery low! Requesting charge."),
     send(charger, request_charge)
 ).
@@ -290,7 +293,9 @@ believes(battery_level(L)), L < 20 :< (
 
 **Difference from `when`:**
 - `when` fires **every cycle** while the condition is true (level-triggered)
-- `:<` fires **once** when the condition becomes true (edge-triggered), then waits for it to become false before it can fire again
+- `?>` fires **once** when the condition becomes true (edge-triggered), then waits for it to become false before it can fire again
+
+**Why `?>` and not `:<`?** In the original DALI, `:<` is the **action precondition** operator (`actionA :< precondition.`). DALI2 preserves this meaning for backward compatibility (decision D4 in CHANGES.md). The DALI2 edge-triggered condition-action feature gets its own operator `?>` to avoid overloading `:<` (decision D5).
 
 ---
 
@@ -830,16 +835,34 @@ actionA(Args) :- Body.
 
 The `A` suffix marks action definitions.
 
+**Action preconditions (`:<`):**
+
+Actions can have preconditions that must hold before the action body executes. This is the original DALI meaning of the `:<` operator.
+
+```prolog
+actionA(Args) :< Precondition.
+actionA(Args) :- Body.
+```
+
+When `do(action(Args))` is called, DALI2 first checks the precondition clause. If the precondition fails, the action is not executed and a log entry is recorded. If no precondition clause exists, the action body runs unconditionally.
+
+> **DALI compatibility note:** In the original DALI (SICStus), `:<` preconditions are **never actually checked** at runtime due to a key-mismatch bug: the `term_expansion` directive stores the precondition as `cd(a(Action))` (with the `a/1` wrapper), but the auto-generated action clause checks `cd(Action)` (without the wrapper), which always succeeds via a default `cd(Action) :- true.` clause. As a result, DALI always executes the action body regardless of the precondition. DALI2 fixes this by correctly checking the precondition before executing the action body. Agents ported from DALI that relied on the precondition being ignored (i.e., the action always running) may behave differently in DALI2 if the precondition actually fails.
+
 **Examples:**
 
 ```prolog
 :- agent(worker, [cycle(2)]).
 
-%% Action definition (DALI A suffix style)
+%% Action with precondition (DALI :< syntax)
+analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
     send(coordinator, inform(analysis_result(Data), complete)).
+
+%% Action without precondition — always runs
+log_heartbeatA :-
+    log("Heartbeat").
 ```
 
 **Calling actions:**
@@ -1040,8 +1063,9 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 |---------|----------------|---------------------|
 | External event | `eventE(X) :> body.` | `eventE(X) :> body.` (identical) |
 | Internal event | `eventI :> body.` + `internal_event/5` | `eventI :> body.` + `internal_event/5` (identical) |
-| Condition-action | `cond :< action.` | `cond :< action.` (identical) |
-| Present event | Atomic (`en/1`) | Atomic (use in body of `:>`, `:<`, `when`) |
+| Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
+| Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
+| Present event | Atomic (`en/1`) | Atomic (use in body of `:>`, `?>`, `when`) |
 | Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
 | Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |

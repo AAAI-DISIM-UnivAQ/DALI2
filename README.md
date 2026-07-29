@@ -6,7 +6,7 @@ DALI2 is the evolution of the [DALI](https://github.com/AAAI-DISIM-UnivAQ/DALI) 
 
 ## Key Features
 
-- **Identical DALI syntax** — no prefix needed, same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI
+- **Identical DALI syntax** — no prefix needed, same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI, plus `?>` for DALI2's edge-triggered condition-action rules
 - **Single-file multi-agent** — define all agents in one `.pl` file; `:- agent(name).` sets the context for subsequent rules
 - **Full DALI feature set** — reactive rules, internal events, goals, constraints, learning, ontologies, tell/told filtering (with body conditions), multi-events (with delta-t), and more
 - **Process-per-agent architecture** — each agent runs as a separate OS process
@@ -219,8 +219,8 @@ check_statusI :>
     log("Still active: ~w at ~w", [Type, Location]).
 internal_event(check_status, 5, forever, true, forever).
 
-%% Condition-action rule (:< operator)
-believes(active(_, _)) :<
+%% Condition-action rule (?> operator, edge-triggered — DALI2 extension)
+believes(active(_, _)) ?>
     log("Alert condition activated!"),
     send(logger, log_event(alert_active, my_agent)).
 
@@ -379,6 +379,8 @@ The web interface at `http://localhost:8080` provides:
 | Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
 | FIPA messages | `confirm`/`disconfirm`/`propose`/`query_ref` | `send(to, confirm(fact))` — full FIPA-ACL |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
+| Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
+| Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
 | Action proposal | `propose(A,C,Ag)` + `call_propose` | `on_proposal(action) :- body.` |
 | Past lifetime | `past_event(ev, 60).` | `past_event(ev, 60).` (identical!) |
 | Remember | `remember_event_mod(ev, number(5), last).` | `remember_event_mod(ev, number(5), last).` (identical!) |
@@ -386,7 +388,6 @@ The web interface at `http://localhost:8080` provides:
 | Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical!) |
 | Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical!) |
 | Residue goals | `tenta_residuo(goal)` | `tenta_residuo(goal)` or `achieve(goal)` |
-| Condition-action | `cond :< action.` | `cond :< action.` (identical!) |
 | Present events | `condN :- body.` | `condN :- body.` (identical!) |
 | Multi-events | `ev1E, ev2E :> body.` | `ev1E, ev2E :> body.` (identical!) |
 | Constraints | `:~ constraint.` | `:~ constraint.` (identical!) |

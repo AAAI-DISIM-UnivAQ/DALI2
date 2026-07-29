@@ -2,7 +2,7 @@
 
 This guide explains all included examples, how to run them, and the commands to test each feature.
 
-DALI2 now supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework. Each agent runs as a **separate OS process**.
+DALI2 now supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework, plus the `?>` operator for DALI2's edge-triggered condition-action rules. Each agent runs as a **separate OS process**.
 
 ## Table of Contents
 
@@ -299,7 +299,7 @@ curl.exe http://localhost:8080/api/past?agent=coordinator
 
 **File:** `examples/showcase.pl`
 
-Demonstrates **all 32 DALI2 features** in a single file using **DALI syntax** (`:>`, `:<`, `~/`, `</`, `?/`, `:~` operators and `E`/`I`/`A` suffixes). This is the comprehensive reference example that covers every rule type, DSL predicate, and advanced feature.
+Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible syntax** (`:>`, `:<`, `?>`, `~/`, `</`, `?/`, `:~` operators and `E`/`I`/`A` suffixes). This is the comprehensive reference example that covers every rule type, DSL predicate, and advanced feature.
 
 ### Agents
 
@@ -322,7 +322,7 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI syntax** (`
 | 5 | **Internal event between** | thermostat | `work_hours_check` fires in time window |
 | 6 | **Periodic tasks** | sensor | Automatic — heartbeat every 15 seconds |
 | 7 | **Condition monitors** (`when`) | logger | Warns when log volume > 10 |
-| 8 | **Condition-action** (`:<`) | thermostat | Edge-triggered when cooling mode activates |
+| 8 | **Condition-action** (`?>`) | thermostat | Edge-triggered when cooling mode activates |
 | 9 | **Present events** | — | Atomic observations (cannot be defined with `:-`) |
 | 10 | **Multi-events with delta-t** | coordinator | Both `sensor_data` + `alert` within 10s → fires |
 | 11 | **Constraints** | thermostat | Temperature > 50 triggers violation |

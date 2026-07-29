@@ -9,7 +9,8 @@
 %%   internal_event(Ev, Period, Rep, S, St).  Internal event configuration
 %%   actionA(X) :- body.                      Action definition
 %%   condN                                    Present event (atomic, body only)
-%%   cond :< action.                          Condition-action
+%%   cond ?> action.                          Condition-action (edge-triggered, DALI2)
+%%   actionA :< precondition.                 Action precondition (DALI)
 %%   head ~/ past1, past2.                    Export past
 %%   head </ past1, past2.                    Export past NOT done
 %%   head ?/ past1, past2.                    Export past done
@@ -46,6 +47,8 @@
     agent_told/4,
     agent_tell/3,
     agent_condition_action/3,
+    agent_action_precond/3,
+    agent_clause/3,
     agent_present/3,
     agent_multi_event/4,
     agent_constraint/3,
@@ -76,6 +79,7 @@
 %% ============================================================
 :- op(1200, xfx, :>).
 :- op(1200, xfx, :<).
+:- op(1200, xfx, ?>).
 :- op(1200, xfx, ~/).
 :- op(1200, xfx, </).
 :- op(1200, xfx, ?/).
@@ -99,6 +103,8 @@
 :- dynamic agent_told/4.       % agent_told(Agent, Pattern, Priority, Body)
 :- dynamic agent_tell/3.        % agent_tell(Agent, Pattern, Body)
 :- dynamic agent_condition_action/3.
+:- dynamic agent_action_precond/3. % agent_action_precond(Agent, ActionKey, Precondition)
+:- dynamic agent_clause/3.         % agent_clause(Agent, Head, Body) — per-agent Prolog KB
 :- dynamic agent_present/3.
 :- dynamic agent_multi_event/4. % agent_multi_event(Agent, EventList, Body, DeltaT)
 :- dynamic agent_constraint/3.
@@ -132,6 +138,8 @@ clear_definitions :-
     retractall(agent_told(_, _, _, _)),
     retractall(agent_tell(_, _, _)),
     retractall(agent_condition_action(_, _, _)),
+    retractall(agent_action_precond(_, _, _)),
+    retractall(agent_clause(_, _, _)),
     retractall(agent_present(_, _, _)),
     retractall(agent_multi_event(_, _, _, _)),
     retractall(agent_constraint(_, _, _)),
@@ -213,6 +221,11 @@ strip_suffix_term(Term, BaseTerm, Suffix) :-
         atom(Term),
         extract_suffix(Term, BaseTerm, Suffix)
     ).
+
+%% precond_key(+Head, -Key) — normalize an action head for precondition
+%% storage: strip a trailing 'A' suffix if present, otherwise use as-is.
+precond_key(Head, Key) :- strip_suffix_term(Head, Key, 'A'), !.
+precond_key(Head, Head).
 
 %% ============================================================
 %% BODY TRANSFORMATION
@@ -298,7 +311,12 @@ process_reactive_rule(Name, Head, Body) :-
 process_suffixed_reactive(Name, BaseHead, 'E', Body) :- !,
     assert(agent_handler(Name, BaseHead, Body)).
 process_suffixed_reactive(Name, BaseHead, 'I', Body) :- !,
-    assert(agent_internal(Name, BaseHead, [forever], Body)).
+    %% DALI auto-generates internal_event(Ev,3,forever,true,until_cond(past(Ev)))
+    %% when no explicit internal_event/5 is declared. The until_cond(past(Ev))
+    %% stop condition prevents re-firing after the event is recorded in past.
+    %% If an explicit internal_event/5 exists, merge_internal_config replaces
+    %% these default options entirely.
+    assert(agent_internal(Name, BaseHead, [forever, until(past(BaseHead))], Body)).
 process_suffixed_reactive(Name, BaseHead, _, Body) :-
     assert(agent_handler(Name, BaseHead, Body)).
 
@@ -317,15 +335,34 @@ parse_multi_event_term(H, Base) :-
     (strip_suffix_term(H, Base, 'E') -> true ; Base = H).
 
 %% ============================================================
-%% :< OPERATOR  (condition-action)
+%% ?> OPERATOR  (condition-action, edge-triggered) — DALI2
+%% Previously written with :<, which is now reserved for DALI action
+%% preconditions (see :< below). Semantics unchanged (fires once when
+%% the condition transitions false -> true).
 %% ============================================================
 
-process_term(:<(Name:Cond, Action)) :- !,
+process_term(?>(Name:Cond, Action)) :- !,
     transform_body(Action, TA),
     assert(agent_condition_action(Name, Cond, TA)).
-process_term(:<(Cond, Action)) :- !,
+process_term(?>(Cond, Action)) :- !,
     transform_body(Action, TA),
     (ctx(Ag) -> assert(agent_condition_action(Ag, Cond, TA)) ; true).
+
+%% ============================================================
+%% :< OPERATOR  (action precondition) — DALI
+%%   actionA :< Precondition.   The action may fire only if Precondition holds.
+%% Stored keyed by the base action term (trailing 'A' stripped if present).
+%% Runtime enforcement (in do/1) is wired in Phase 2.
+%% ============================================================
+
+process_term(:<(Name:Head, Pre)) :- !,
+    precond_key(Head, Key),
+    transform_body(Pre, TP),
+    assert(agent_action_precond(Name, Key, TP)).
+process_term(:<(Head, Pre)) :- !,
+    precond_key(Head, Key),
+    transform_body(Pre, TP),
+    (ctx(Ag) -> assert(agent_action_precond(Ag, Key, TP)) ; true).
 
 %% ============================================================
 %% ~/ OPERATOR  (export past)
@@ -551,6 +588,19 @@ process_term((Head :- _Body)) :-
     format(user_error, "DALI2 loader WARNING: External event '~w' cannot be defined with :- (it is atomic). Use :> operator instead: ~w :> body.~n", [Head, Head]).
 
 %% ============================================================
+%% ARBITRARY PROLOG CLAUSE (DALI compatibility)
+%% Any remaining non-suffixed, non-special `Head :- Body` becomes an
+%% agent-local clause (per-agent knowledge base). This is reached only
+%% after all specific :- handlers above have been tried (they all cut),
+%% so Head here is an ordinary user predicate. Engine wiring (goal
+%% resolution + assert/retract routing) is done at runtime in Phase 2.
+%% ============================================================
+process_term((Head :- Body)) :-
+    nonvar(Head), \+ (Head = _:_), !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_clause(Ag, Head, TB)) ; true).
+
+%% ============================================================
 %% CATCH-ALL: bare Prolog facts/rules as beliefs or ignored
 %% ============================================================
 
@@ -584,11 +634,19 @@ post_process_internals :-
 
 merge_internal_config(Name, Event, Period, Repetition, StartCond, StopCond) :-
     build_internal_options(Period, Repetition, StartCond, StopCond, Options),
-    (retract(agent_internal(Name, Event, _OldOpts, Body)) ->
-        assert(agent_internal(Name, Event, Options, Body))
+    internal_functor(Event, F),
+    %% Correlate by FUNCTOR NAME so a reaction `pI(Args) :> ...` (e.g. arity 2)
+    %% pairs with its `internal_event(p, ...)` config (often arity 0), as in DALI.
+    ( agent_internal(Name, RxEvent, OldOpts, Body), internal_functor(RxEvent, F) ->
+        retract(agent_internal(Name, RxEvent, OldOpts, Body)),
+        assert(agent_internal(Name, RxEvent, Options, Body))
+    ; retract(agent_internal(Name, Event, _OldOpts, Body0)) ->
+        assert(agent_internal(Name, Event, Options, Body0))
     ;
         assert(agent_internal(Name, Event, Options, true))
     ).
+
+internal_functor(T, F) :- (atom(T) -> F = T ; functor(T, F, _)).
 
 build_internal_options(Period, Repetition, StartCond, StopCond, Options) :-
     (number(Period), Period > 0 -> IO = [interval(Period)] ; IO = []),

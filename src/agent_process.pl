@@ -273,18 +273,28 @@ process_single_internal_local(Name, Event, Options, Body, Now) :-
     process_change_condition_local(InternalId, Options),
     (should_fire_internal_local(InternalId, Options, Now) ->
         (catch(
-            (copy_term(Event-Body, _ECopy-BodyCopy),
+            (copy_term(Event-Body, ECopy-BodyCopy),
+             internal_guard_local(Name, ECopy),
              execute_body_local(Name, BodyCopy),
              increment_internal_count_local(InternalId),
              retractall(agent_last_internal_fire(InternalId, _)),
              assert(agent_last_internal_fire(InternalId, Now)),
              get_time(Stamp), T is truncate(Stamp * 1000),
-             record_past_local(internal(Event), T),
-             fire_learning_local(Name, Event)),
+             record_past_local(internal(ECopy), T),
+             fire_learning_local(Name, ECopy)),
             Error,
             log_local(Name, "Internal event error: ~w", [Error])
         ) -> true ; true)
     ; true).
+
+%% internal_guard_local(+Name, +Event) — DALI internal events fire only when the
+%% base predicate (the event term) is provable against the agent's KB. If the
+%% agent does not define it, the event fires unconditionally (DALI2 default).
+%% Binds the variables shared with the reaction body.
+internal_guard_local(Name, Event) :-
+    (has_user_definition_local(Name, Event) ->
+        solve_user_goal_local(Name, Event)
+    ;   true).
 
 process_change_condition_local(InternalId, Options) :-
     (member(change(FactList), Options) ->
@@ -673,15 +683,23 @@ execute_body_local(_, has_past(Event, Time)) :- !,
     ; agent_past_event(internal(Event), Time, _)).
 
 %% Actions
+%% DALI semantics: an action fires only if its precondition (actionA :< Pre) holds
+%% (or there is no precondition). Actions with a defining clause run its body;
+%% actions with no clause are atomic and are just recorded as done.
 execute_body_local(Name, do(Action)) :- !,
-    (loader:agent_action(Name, ActionPattern, ActionBody),
-     copy_term(ActionPattern-ActionBody, Action-BodyCopy) ->
-        log_local(Name, "Executing action: ~w", [Action]),
+    (action_precondition_holds_local(Name, Action) ->
         get_time(Stamp), T is truncate(Stamp * 1000),
-        record_past_local(did(Action), T),
-        execute_body_local(Name, BodyCopy)
+        (loader:agent_action(Name, ActionPattern, ActionBody),
+         copy_term(ActionPattern-ActionBody, Action-BodyCopy) ->
+            log_local(Name, "Executing action: ~w", [Action]),
+            record_past_local(did(Action), T),
+            execute_body_local(Name, BodyCopy)
+        ;
+            log_local(Name, "Executing atomic action: ~w", [Action]),
+            record_past_local(did(Action), T)
+        )
     ;
-        log_local(Name, "Unknown action: ~w", [Action])
+        log_local(Name, "Action precondition not met: ~w", [Action])
     ).
 
 %% Helpers
@@ -811,15 +829,62 @@ execute_body_local(Name, messageA(Dest, send_message(Content, _Me))) :- !,
     execute_body_local(Name, send(Dest, Content)).
 execute_body_local(Name, messageA(Dest, send_message(Content))) :- !,
     execute_body_local(Name, send(Dest, Content)).
+execute_body_local(Name, messageA(Dest, send_message(Content, _Me), _ReplyTo)) :- !,
+    execute_body_local(Name, send(Dest, Content)).
 execute_body_local(_, evp(Event)) :- !,
     (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
 execute_body_local(Name, tenta_residuo(Goal)) :- !,
     execute_body_local(Name, achieve(Goal)).
 
+%% assert/retract routing (DALI compatibility) — a DALI agent treats its own
+%% facts as a mutable knowledge base, so fact-level assert/retract in a body
+%% must operate on the per-agent belief store, not the global database.
+execute_body_local(_, assert(Fact))     :- !, assert(agent_belief_rt(Fact)).
+execute_body_local(_, assertz(Fact))    :- !, assert(agent_belief_rt(Fact)).
+execute_body_local(_, asserta(Fact))    :- !, asserta(agent_belief_rt(Fact)).
+execute_body_local(_, retract(Fact))    :- !, retract(agent_belief_rt(Fact)).
+execute_body_local(_, retractall(Fact)) :- !, retractall(agent_belief_rt(Fact)).
+
+%% Per-agent knowledge base + belief facts (DALI compatibility).
+%% If the agent defines this predicate (arbitrary clause pasted from DALI) or
+%% holds it as a belief fact, resolve it against the agent's own KB rather than
+%% the global module. This is what makes pasted DALI rule bodies work.
+execute_body_local(Name, Goal) :-
+    callable(Goal),
+    has_user_definition_local(Name, Goal), !,
+    solve_user_goal_local(Name, Goal).
+
 %% Catch-all
 execute_body_local(Name, Goal) :-
     catch(call(Goal), Error,
         (log_local(Name, "Goal failed: ~w error: ~w", [Goal, Error]), fail)).
+
+%% has_user_definition_local(+Name, +Goal) — true if the agent defines Goal's
+%% predicate as a KB clause or holds a belief fact with the same functor/arity.
+has_user_definition_local(Name, Goal) :-
+    functor(Goal, F, A),
+    ( loader:agent_clause(Name, H, _), functor(H, F, A) -> true
+    ; agent_belief_rt(B), functor(B, F, A) -> true
+    ).
+
+%% solve_user_goal_local(+Name, +Goal) — resolve against KB clauses, then belief
+%% facts (both non-deterministic, so backtracking works as in plain Prolog).
+solve_user_goal_local(Name, Goal) :-
+    ( loader:agent_clause(Name, Head, Body),
+      copy_term(Head-Body, Goal-BodyCopy),
+      execute_body_local(Name, BodyCopy)
+    ; agent_belief_rt(Goal)
+    ).
+
+%% action_precondition_holds_local(+Name, +Action) — true if the action has no
+%% precondition, or at least one matching precondition (actionA :< Pre) holds.
+action_precondition_holds_local(Name, Action) :-
+    (loader:agent_action_precond(Name, Key, _), \+ \+ Key = Action ->
+        ( loader:agent_action_precond(Name, K, Pre),
+          copy_term(K-Pre, Action-PreC),
+          catch(call_condition_local(PreC), _, fail) )
+    ;   true
+    ).
 
 %% ============================================================
 %% CONDITION EVALUATION
@@ -835,6 +900,11 @@ call_condition_local(learned(Pattern, Outcome)) :- !, agent_learned_rt(Pattern, 
 call_condition_local(has_remember(Event)) :- !, agent_remember_ev(Event, _, _).
 call_condition_local(has_confirmed(Fact)) :- !, agent_past_event(confirmed(Fact), _, _).
 call_condition_local(bb_read(Pattern)) :- !, redis_comm:redis_bb_read(Pattern).
+%% Resolve user predicates / belief facts against the per-agent KB (DALI compat),
+%% otherwise fall back to global builtins (arithmetic, comparisons, ...).
+call_condition_local(Cond) :-
+    callable(Cond), agent_name(Name), has_user_definition_local(Name, Cond), !,
+    solve_user_goal_local(Name, Cond).
 call_condition_local(Cond) :- call(Cond).
 
 %% ============================================================
@@ -894,7 +964,15 @@ process_ontology_term_local(_, _).
 %% PAST MEMORY
 %% ============================================================
 
+% record_past_local/2 — DALI-compatible past assertion.
+% DALI's divP/3: when a new past event is asserted, if a past entry for the
+% same event already exists, the OLD entry is moved to remember before the
+% new one is asserted.  This implements the E→past→remember lifecycle where
+% a recurring event pushes its previous occurrence into remember.
 record_past_local(Event, Timestamp) :-
+    (retract(agent_past_event(Event, OldTs, OldSrc)) ->
+        assert(agent_remember_ev(Event, OldTs, OldSrc))
+    ; true),
     assert(agent_past_event(Event, Timestamp, runtime)).
 
 %% ============================================================

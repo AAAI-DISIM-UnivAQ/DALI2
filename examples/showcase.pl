@@ -1,6 +1,6 @@
 %% DALI2 Example: Feature Showcase
 %% Demonstrates ALL DALI2 rule types and DSL predicates in a single file,
-%% using original DALI syntax (operators :>, :<, ~/, </, ?/, :~ and
+%% using original DALI syntax (operators :>, :<, ?>, ~/, </, ?/, :~ and
 %% suffixes E, I, A, N, P) plus DALI2-only features (every, when, helper,
 %% on_proposal, learn_from, ontology, ask_ai, bb_read/bb_write/bb_remove).
 %%
@@ -21,7 +21,7 @@
 %%   6.  Internal event between(time)            — thermostat (work hours check)
 %%   7.  Periodic tasks (every)                  — sensor (heartbeat 15s)         [NEW]
 %%   8.  Condition monitors (when)               — logger (high log volume warning) [NEW]
-%%   9.  Condition-action (:< operator)          — thermostat (cooling mode edge-triggered)
+%%   9.  Condition-action (?> operator)          — thermostat (cooling mode edge-triggered)
 %%  10.  Present/environment events (N suffix)   — sensor (blackboard monitoring)
 %%  11.  Multi-events (E suffix conjunction)     — coordinator (sensor_data + alert)
 %%  12.  Constraints (:~ operator)               — thermostat (temp < 50)
@@ -41,6 +41,7 @@
 %%  26.  Inline ontology declarations            — logger (same_as, eq_property)   [NEW]
 %%  27.  Learning rules                          — sensor (overheating pattern)    [NEW]
 %%  28.  Actions (A suffix)                      — worker (analyze action)
+%%  28b. Action preconditions (:< operator)      — worker (analyze requires data_ready) [DALI compat]
 %%  29.  Beliefs                                 — all agents
 %%  30.  Helpers                                 — logger (count_logs)             [NEW]
 %%  31.  Blackboard                              — sensor writes, sensor reads     [NEW]
@@ -61,7 +62,7 @@
 %%   - Internal event with trigger/start condition (fires only when condition holds)
 %%   - Internal event with between/time window
 %%   - Constraint (:~ operator) — temperature must stay below 50
-%%   - Condition-action (:< operator) — edge-triggered on cooling mode
+%%   - Condition-action (?> operator) — edge-triggered on cooling mode
 %%   - Reactive rules (E suffix + :>) — set_temp, update_temp
 
 :- agent(thermostat, [cycle(2)]).
@@ -98,8 +99,8 @@ internal_event(work_hours_check, 10, forever, true, in_date(time(0,0), time(23,5
 %% :~ Condition. — fires when Condition is FALSE (violated)
 :~ (believes(current_temp(T)), T < 50).
 
-%% Condition-action rule (DALI :< syntax, edge-triggered)
-believes(mode(cooling)) :< (
+%% Condition-action rule (DALI2 ?> syntax, edge-triggered)
+believes(mode(cooling)) ?> (
     log("ON_CHANGE: Cooling mode just activated"),
     send(logger, log_event(mode_change, thermostat, cooling))
 ).
@@ -392,7 +393,11 @@ on_proposal(impossible_task) :-
     log("PROPOSAL: Rejecting impossible_task from ~w", [Sender]),
     reject_proposal(Sender, impossible_task).
 
-%% Action definition (DALI A suffix style)
+%% Action definition (DALI A suffix style) with precondition (DALI :< syntax)
+%% The precondition must hold before the action body executes.
+%% (In original DALI this was never actually checked due to a bug;
+%%  DALI2 enforces it correctly.)
+analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),

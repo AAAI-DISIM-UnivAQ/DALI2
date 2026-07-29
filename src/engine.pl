@@ -1148,6 +1148,8 @@ execute_body(Name, messageA(Dest, send_message(Content, _Me))) :- !,
     execute_body(Name, send(Dest, Content)).
 execute_body(Name, messageA(Dest, send_message(Content))) :- !,
     execute_body(Name, send(Dest, Content)).
+execute_body(Name, messageA(Dest, send_message(Content, _Me), _ReplyTo)) :- !,
+    execute_body(Name, send(Dest, Content)).
 
 % evp(Event) → has_past(Event)
 execute_body(Name, evp(Event)) :- !,
