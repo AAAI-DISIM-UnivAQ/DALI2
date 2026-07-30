@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY src/ src/
 COPY web/ web/
 COPY examples/ examples/
+COPY examples_new_features/ examples_new_features/
 COPY README.md RULES.md EXAMPLES.md ./
 
 # Ensure all files are readable
