@@ -248,7 +248,8 @@ transform_body(messageA(Dest, send_message(Content)), send(Dest, Content)) :- !.
 transform_body(evp(Event), has_past(Event)) :- !.
 transform_body(clause(past(Event,_,_),_), has_past(Event)) :- !.
 transform_body(clause(isa(Fact,_,_),_), believes(Fact)) :- !.
-transform_body(tenta_residuo(Goal), achieve(Goal)) :- !.
+transform_body(tenta_residuo(Goal), achieve(TGoal)) :- !,
+    transform_body(Goal, TGoal).
 transform_body(Term, do(BaseTerm)) :-
     nonvar(Term), \+ functor(Term, messageA, _),
     strip_suffix_term(Term, BaseTerm, 'A'), !.

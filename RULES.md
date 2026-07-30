@@ -118,7 +118,7 @@ The `E` suffix marks external events. The `:>` operator separates the head from 
 %% React to a simple event
 readingE(Value) :>
     log("Sensor reading: ~w", [Value]),
-    send(analyzer, data(Value)).
+    messageA(analyzer, send_message(data(Value), Me)).
 
 :- agent(coordinator, [cycle(1)]).
 
@@ -126,12 +126,12 @@ readingE(Value) :>
 alarmE(Type, Location) :>
     log("Alarm: ~w at ~w", [Type, Location]),
     assert_belief(active_alarm(Type, Location)),
-    send(responder, respond(Location, Type)).
+    messageA(responder, send_message(respond(Location, Type), Me)).
 ```
 
 When a message arrives, the engine matches it against all handlers for the receiving agent. If the agent has ontology declarations, matching is ontology-aware (e.g., `alarmE(hot(X))` will also match `alarm(warm(X))` if `same_as(hot, warm)` is declared).
 
-**Body predicates:** Inside `:>` bodies, you can use both DALI-style predicates (`messageA`, `eventP`, `actionA`, `evp`, `tenta_residuo`) and DALI2-style predicates (`send`, `has_past`, `do`, `achieve`). They are equivalent.
+**Body predicates:** Inside `:>` bodies, you can use both DALI-style predicates (`messageA`, `eventP`, `actionA`, `evp`, `tenta_residuo`) and DALI2-style predicates (`send`, `has_past`, `do`, `achieve`). They are equivalent. For FIPA compatibility, prefer `messageA(Dest, send_message(Content, Me))` over `send(Dest, Content)`.
 
 ---
 
@@ -226,7 +226,7 @@ every(10, log("Heartbeat")).
 %% Periodic with body
 every(30) :-
     log("Checking system health"),
-    send(dashboard, health_check).
+    messageA(dashboard, send_message(health_check, Me)).
 ```
 
 Unlike internal events, periodic tasks don't have conditional options — they simply fire every N seconds.
@@ -251,13 +251,13 @@ when(Condition1, Condition2) :- Body.     %% both must hold
 
 %% Fire every cycle while temperature is high
 when(believes(temperature(T)), T > 30) :-
-    send(ac_controller, cool_down).
+    messageA(ac_controller, send_message(cool_down, Me)).
 
 :- agent(alarm, [cycle(1)]).
 
 %% Check a past event condition
 when(has_past(intrusion_detected)) :-
-    send(security, alert).
+    messageA(security, send_message(alert, Me)).
 ```
 
 ---
@@ -282,7 +282,7 @@ The `?>` operator is a **DALI2 extension** — it reads as "if condition, then a
 %% Fire once when cooling mode activates (DALI2 ?> syntax)
 believes(mode(cooling)) ?> (
     log("Cooling mode just activated"),
-    send(logger, log_event(mode_change, thermostat, cooling))
+    messageA(logger, send_message(log_event(mode_change, thermostat, cooling), Me))
 ).
 
 :- agent(robot, [cycle(1)]).
@@ -290,7 +290,7 @@ believes(mode(cooling)) ?> (
 %% Fire once when battery becomes low
 believes(battery_level(L)), L < 20 ?> (
     log("Battery low! Requesting charge."),
-    send(charger, request_charge)
+    messageA(charger, send_message(request_charge, Me))
 ).
 ```
 
@@ -350,7 +350,7 @@ The optional `within(Seconds)` specifies a **delta-t** (simultaneity interval): 
 %% Fire when both sensor data AND alert received within 10 seconds
 sensor_dataE(_), alertE(_, _), within(10) :>
     log("Both events received within 10s!"),
-    send(logger, log_event(combined_alert, coordinator, multi_trigger)).
+    messageA(logger, send_message(log_event(combined_alert, coordinator, multi_trigger), Me)).
 
 %% Fire when all three events occurred (no time constraint)
 loginE(User), verifyE(User), authorizeE(User) :>
@@ -412,7 +412,7 @@ test_goal(GoalCondition) :- Plan.   %% test goal
 %% Keep sending calibration requests until calibrated (DALI obt_goal)
 obt_goal(believes(calibrated(true))) :-
     log("Attempting calibration..."),
-    send(coordinator, calibration_request).
+    messageA(coordinator, send_message(calibration_request, Me)).
 
 :- agent(coordinator, [cycle(2)]).
 
@@ -506,18 +506,20 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication. 
 
 | Type | Syntax | Receiver Semantics |
 |------|--------|--------------------|
-| `inform(Content)` | `send(To, inform(Content))` | Normal handler + past record |
-| `inform(Content, Meta)` | `send(To, inform(Content, Meta))` | Normal handler + past record |
-| `confirm(Fact)` | `send(To, confirm(Fact))` | Records `confirmed(Fact)` as past event |
-| `disconfirm(Fact)` | `send(To, disconfirm(Fact))` | Removes `confirmed(Fact)` from past |
-| `propose(Action)` | `send(To, propose(Action))` | Fires `on_proposal` handler |
-| `accept_proposal(Action)` | `send(To, accept_proposal(A))` | Normal handler |
-| `reject_proposal(Action)` | `send(To, reject_proposal(A))` | Normal handler |
-| `query_ref(Query)` | `send(To, query_ref(Query))` | Auto-responds with matching beliefs |
-| `agree(Content)` | `send(To, agree(Content))` | Normal handler |
-| `refuse(Content)` | `send(To, refuse(Content))` | Normal handler |
-| `failure(Action, Reason)` | `send(To, failure(A, R))` | Normal handler |
-| `cancel(Action)` | `send(To, cancel(Action))` | Normal handler |
+| `inform(Content)` | `messageA(To, send_message(inform(Content), Me))` | Normal handler + past record |
+| `inform(Content, Meta)` | `messageA(To, send_message(inform(Content, Meta), Me))` | Normal handler + past record |
+| `confirm(Fact)` | `messageA(To, send_message(confirm(Fact), Me))` | Records `confirmed(Fact)` as past event |
+| `disconfirm(Fact)` | `messageA(To, send_message(disconfirm(Fact), Me))` | Removes `confirmed(Fact)` from past |
+| `propose(Action)` | `messageA(To, send_message(propose(Action), Me))` | Fires `on_proposal` handler |
+| `accept_proposal(Action)` | `messageA(To, send_message(accept_proposal(A), Me))` | Normal handler |
+| `reject_proposal(Action)` | `messageA(To, send_message(reject_proposal(A), Me))` | Normal handler |
+| `query_ref(Query)` | `messageA(To, send_message(query_ref(Query), Me))` | Auto-responds with matching beliefs |
+| `agree(Content)` | `messageA(To, send_message(agree(Content), Me))` | Normal handler |
+| `refuse(Content)` | `messageA(To, send_message(refuse(Content), Me))` | Normal handler |
+| `failure(Action, Reason)` | `messageA(To, send_message(failure(A, R), Me))` | Normal handler |
+| `cancel(Action)` | `messageA(To, send_message(cancel(Action), Me))` | Normal handler |
+
+> **Shorthand:** `send(To, Content)` is accepted as equivalent to `messageA(To, send_message(Content, Me))`. For FIPA compatibility, prefer the `messageA` form.
 
 **Special semantics:**
 
@@ -533,13 +535,13 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication. 
 
 %% Confirm a fact to another agent
 measurement_completeE(Data) :>
-    send(coordinator, confirm(measurement(Data))).
+    messageA(coordinator, send_message(confirm(measurement(Data)), Me)).
 
 :- agent(coordinator, [cycle(2)]).
 
 %% Query another agent's beliefs
 need_statusE :>
-    send(sensor, query_ref(status(_))).
+    messageA(sensor, send_message(query_ref(status(_)), Me)).
 
 %% Handle the query response
 informE(query_ref(Q), values(V)) :>
@@ -581,7 +583,7 @@ on_proposal(impossible_task) :-
 
 %% Coordinator sends a proposal
 request_analysisE(Data) :>
-    send(worker, propose(analyze(Data))).
+    messageA(worker, send_message(propose(analyze(Data)), Me)).
 
 %% Coordinator handles response
 accept_proposalE(Action) :>
@@ -692,7 +694,7 @@ Action </ past_event1, past_event2.
 :- agent(coordinator, [cycle(2)]).
 
 %% When both alert and sensor_data in past, consume and react (DALI ~/ syntax)
-send(logger, log_event(past_consumed, coordinator, [Type, Value])) ~/
+messageA(logger, send_message(log_event(past_consumed, coordinator, [Type, Value]), Me)) ~/
     alert(Type, _), sensor_data(Value).
 
 %% Warn if backup was NOT done but critical data exists (DALI </ syntax)
@@ -812,11 +814,11 @@ read_tempE(T) :>
     log("Sensor read: ~w", [T]),
     ( learned(read_temp(_), overheating) ->
         log("WARNING: Previously learned overheating pattern!"),
-        send(coordinator, alert(repeated_overheating, T))
+        messageA(coordinator, send_message(alert(repeated_overheating, T), Me))
     ;
         true
     ),
-    send(coordinator, sensor_data(T)).
+    messageA(coordinator, send_message(sensor_data(T), Me)).
 ```
 
 **DSL predicates for learning:**
@@ -861,7 +863,7 @@ analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
-    send(coordinator, inform(analysis_result(Data), complete)).
+    messageA(coordinator, send_message(inform(analysis_result(Data), complete), Me)).
 
 %% Action without precondition — always runs
 log_heartbeatA :-
@@ -935,7 +937,8 @@ These predicates are available inside rule bodies:
 
 | Predicate | Description |
 |-----------|-------------|
-| `send(Agent, Content)` | Send a message to another agent (filtered by tell/told) |
+| `messageA(Agent, send_message(Content, Me))` | Send a message to another agent (FIPA-style, filtered by tell/told) |
+| `send(Agent, Content)` | Shorthand for `messageA(Agent, send_message(Content, Me))` |
 | `broadcast(Content)` | Send to all other agents |
 | `from(Sender)` | Get sender of current message (use in handlers/proposals) |
 | `reply_to(Content)` | Reply to current message sender |
@@ -1083,7 +1086,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Told | `told(_, pattern, pri) :- body.` | `told(_, pattern, pri) :- body.` (identical) |
 | Told (no priority) | `told(_, pattern) :- body.` | `told(_, pattern) :- body.` (identical) |
 | Tell | `tell(_, _, pattern) :- body.` | `tell(_, _, pattern) :- body.` (identical) |
-| Send message | `messageA(dest, send_message(content, Me))` | Same, or `send(dest, content)` |
+| Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `send(dest, content)` as shorthand) |
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |
 | Belief check | `clause(isa(fact,_,_),_)` | Same, or `believes(fact)` |

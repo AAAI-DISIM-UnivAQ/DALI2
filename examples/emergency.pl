@@ -2,7 +2,7 @@
 %% Ported from the original DALI emergency example (dalia/example).
 %%
 %% Agents (9):
-%%   - sensor:        detects events, validates alarms via internal events (real vs false)
+%%   - sensor:        detects events, validates alarms (real vs false)
 %%   - coordinator:   multi-step dispatch: AI analysis, waits for equipment before responder
 %%   - manager:       determines equipment based on emergency type
 %%   - evacuator:     handles evacuation, reports back
@@ -12,57 +12,42 @@
 %%   - logger:        logs all events
 %%
 %% Flow:
-%%   sense(fire, building_a) → sensor validates → coordinator dispatches
-%%   → manager selects equipment → coordinator waits for equipment + location
-%%   → responder dispatched → evacuator + responder report back → done
+%%   sense(fire, building_a) -> sensor validates -> coordinator dispatches
+%%   -> manager selects equipment -> coordinator waits for equipment + location
+%%   -> responder dispatched -> evacuator + responder report back -> done
 %%
 %% Run:   AGENT_FILE=examples/emergency.pl docker compose up --build
 %% Or:    swipl -l src/server.pl -g main -- 8080 examples/emergency.pl
 
 %% ============================================================
-%% SENSOR — detects events, validates alarms via internal events
+%% SENSOR — detects events, validates alarms
 %% ============================================================
-%%
-%% Pattern from DALI: senseE stores state → internal events check
-%% if the detection is a real alarm (smoke/fire/earthquake) or false alarm.
 
 :- agent(sensor, [cycle(1)]).
 
-%% Receive a detection event, store state for internal event validation
+%% Receive a detection event, validate and forward
 senseE(Type, Location) :>
     log("Detected: ~w at ~w", [Type, Location]),
-    assert_belief(detected(Type, Location)),
-    send(logger, log_event(detection, sensor, [Type, Location])).
-
-%% Internal event: real alarm — type is smoke, fire, or earthquake
-check_alarmI :>
-    believes(detected(Type, Location)),
-    member(Type, [smoke, fire, earthquake]),
-    log("ALARM CONFIRMED: ~w at ~w", [Type, Location]),
-    retract_belief(detected(Type, Location)),
-    send(coordinator, alarm(Type, Location)),
-    send(logger, log_event(alarm, sensor, [Type, Location])).
-internal_event(check_alarm, 0, forever, true, forever).
-
-%% Internal event: false alarm — type is not in alarm list
-check_false_alarmI :>
-    believes(detected(Type, Location)),
-    \+ member(Type, [smoke, fire, earthquake]),
-    log("FALSE ALARM: ~w at ~w", [Type, Location]),
-    retract_belief(detected(Type, Location)),
-    send(logger, log_event(false_alarm, sensor, [Type, Location])).
-internal_event(check_false_alarm, 0, forever, true, forever).
+    messageA(logger, send_message(log_event(detection, sensor, [Type, Location]), Me)),
+    ( member(Type, [smoke, fire, earthquake]) ->
+        log("ALARM CONFIRMED: ~w at ~w", [Type, Location]),
+        messageA(coordinator, send_message(alarm(Type, Location), Me)),
+        messageA(logger, send_message(log_event(alarm, sensor, [Type, Location]), Me))
+    ;
+        log("FALSE ALARM: ~w at ~w", [Type, Location]),
+        messageA(logger, send_message(log_event(false_alarm, sensor, [Type, Location]), Me))
+    ).
 
 %% ============================================================
 %% COORDINATOR — multi-step dispatch with AI and internal events
 %% ============================================================
 %%
-%% Pattern from DALI:
-%%   1. alarm → assert location, AI analysis, dispatch evacuator + communicator + manager
-%%   2. manager sends equipped(E) → assert equipment
-%%   3. Internal: location + equipment ready → dispatch responder
+%% Pattern:
+%%   1. alarm -> assert location, AI analysis, dispatch evacuator + communicator + manager
+%%   2. manager sends equipped(E) -> assert equipment
+%%   3. Internal: location + equipment ready -> dispatch responder
 %%   4. evacuator sends evacuated(L), responder sends responded(L)
-%%   5. Internal: evacuated + responded → emergency resolved
+%%   5. Internal: evacuated + responded -> emergency resolved
 
 :- agent(coordinator, [cycle(1)]).
 
@@ -76,11 +61,11 @@ alarmE(Type, Location) :>
         log("AI suggests: ~w", [Advice])
     ; true ),
     %% Dispatch evacuator + communicator
-    send(evacuator, evacuate(Location, Type)),
-    send(communicator, notify_civilians(Type, Location)),
+    messageA(evacuator, send_message(evacuate(Location, Type), Me)),
+    messageA(communicator, send_message(notify_civilians(Type, Location), Me)),
     %% Request equipment from manager
-    send(manager, emergency(Type)),
-    send(logger, log_event(dispatch, coordinator, [Type, Location])).
+    messageA(manager, send_message(emergency(Type), Me)),
+    messageA(logger, send_message(log_event(dispatch, coordinator, [Type, Location]), Me)).
 
 equippedE(Equipment) :>
     log("Equipment received: ~w", [Equipment]),
@@ -89,25 +74,24 @@ equippedE(Equipment) :>
 evacuatedE(Location) :>
     log("Evacuation complete: ~w", [Location]),
     assert_belief(evacuated(Location)),
-    send(logger, log_event(report, evacuator, [evacuation_complete, Location])).
+    messageA(logger, send_message(log_event(report, evacuator, [evacuation_complete, Location]), Me)).
 
 respondedE(Location) :>
     log("Response complete: ~w", [Location]),
     assert_belief(responded(Location)),
-    send(logger, log_event(report, responder, [response_complete, Location])).
+    messageA(logger, send_message(log_event(report, responder, [response_complete, Location]), Me)).
 
-%% Internal event: when location + equipment ready → dispatch responder
+%% Internal event: when location + equipment ready -> dispatch responder
 dispatch_responseI :>
     believes(pending_location(Location)),
     believes(equipment_ready(Equipment)),
     log("Dispatching responder with ~w to ~w", [Equipment, Location]),
     retract_belief(pending_location(Location)),
     retract_belief(equipment_ready(Equipment)),
-    send(responder, respond(Equipment, Location)),
-    send(logger, log_event(response_dispatched, coordinator, [Equipment, Location])).
-internal_event(dispatch_response, 0, forever, true, forever).
+    messageA(responder, send_message(respond(Equipment, Location), Me)),
+    messageA(logger, send_message(log_event(response_dispatched, coordinator, [Equipment, Location]), Me)).
 
-%% Internal event: when evacuated + responded → emergency resolved
+%% Internal event: when evacuated + responded -> emergency resolved
 check_doneI :>
     believes(evacuated(Location)),
     believes(responded(Location)),
@@ -115,15 +99,11 @@ check_doneI :>
     retract_belief(evacuated(Location)),
     retract_belief(responded(Location)),
     retract_belief(active_emergency(_, Location)),
-    send(logger, log_event(done, coordinator, [resolved, Location])).
-internal_event(check_done, 0, forever, true, forever).
+    messageA(logger, send_message(log_event(done, coordinator, [resolved, Location]), Me)).
 
 %% ============================================================
 %% MANAGER — determines equipment based on emergency type
 %% ============================================================
-%%
-%% Pattern from DALI: fire → firetruck, earthquake → bulldozer,
-%% smoke → respirator. Sends equipped(E) back to coordinator.
 
 :- agent(manager, [cycle(1)]).
 
@@ -135,8 +115,8 @@ emergencyE(Type) :>
     ; Equipment = generic_kit
     ),
     log("Dispatching ~w for ~w", [Equipment, Type]),
-    send(coordinator, equipped(Equipment)),
-    send(logger, log_event(equipment, manager, [Equipment, Type])).
+    messageA(coordinator, send_message(equipped(Equipment), Me)),
+    messageA(logger, send_message(log_event(equipment, manager, [Equipment, Type]), Me)).
 
 %% ============================================================
 %% EVACUATOR — handles evacuation, reports back
@@ -146,8 +126,8 @@ emergencyE(Type) :>
 
 evacuateE(Location, Type) :>
     log("Evacuating ~w due to ~w", [Location, Type]),
-    send(coordinator, evacuated(Location)),
-    send(logger, log_event(evacuation, evacuator, [Location, Type])).
+    messageA(coordinator, send_message(evacuated(Location), Me)),
+    messageA(logger, send_message(log_event(evacuation, evacuator, [Location, Type]), Me)).
 
 %% ============================================================
 %% RESPONDER — responds with equipment, reports back
@@ -157,8 +137,8 @@ evacuateE(Location, Type) :>
 
 respondE(Equipment, Location) :>
     log("Using ~w at ~w", [Equipment, Location]),
-    send(coordinator, responded(Location)),
-    send(logger, log_event(response, responder, [Equipment, Location])).
+    messageA(coordinator, send_message(responded(Location), Me)),
+    messageA(logger, send_message(log_event(response, responder, [Equipment, Location]), Me)).
 
 %% ============================================================
 %% COMMUNICATOR — notifies civilians
@@ -168,9 +148,9 @@ respondE(Equipment, Location) :>
 
 notify_civiliansE(Type, Location) :>
     log("Notifying civilians about ~w at ~w", [Type, Location]),
-    send(mary, message(Type, Location)),
-    send(john, message(Type, Location)),
-    send(logger, log_event(notification, communicator, [Type, Location])).
+    messageA(mary, send_message(message(Type, Location), Me)),
+    messageA(john, send_message(message(Type, Location), Me)),
+    messageA(logger, send_message(log_event(notification, communicator, [Type, Location]), Me)).
 
 %% ============================================================
 %% PERSON AGENTS — receive evacuation messages

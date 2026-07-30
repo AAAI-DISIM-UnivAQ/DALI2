@@ -223,10 +223,10 @@ internal_event(check_status, 5, forever, true, forever).  %% DALI2 extension
 %% Condition-action rule (?> operator, edge-triggered — DALI2 extension)
 believes(active(_, _)) ?>
     log("Alert condition activated!"),
-    send(logger, log_event(alert_active, my_agent)).
+    messageA(logger, send_message(log_event(alert_active, my_agent), Me)).
 
 %% Export past (~/ operator)
-send(logger, report(Type, Loc)) ~/
+messageA(logger, send_message(report(Type, Loc), Me)) ~/
     alarm(Type, Loc), response(Loc).
 
 %% Told rules (DALI communication.con style)
@@ -239,7 +239,7 @@ remember_event(alarm(_,_), 3600).
 
 %% Obtain goal
 obt_goal(believes(all_clear)) :-
-    send(coordinator, check_status_request).
+    messageA(coordinator, send_message(check_status_request, Me)).
 
 %% Action definition (A suffix)
 dispatchA(Type, Location) :-
@@ -306,7 +306,7 @@ analyzeE(Data) :>
     ( ai_available ->
         ask_ai(analyze_situation(Data), Advice),
         log("AI says: ~w", [Advice]),
-        send(coordinator, ai_recommendation(Advice))
+        messageA(coordinator, send_message(ai_recommendation(Advice), Me))
     ;
         log("AI not available, using default logic")
     ).
@@ -375,10 +375,10 @@ The web interface at `http://localhost:8080` provides:
 | AI integration | External Python TCP service | Built-in (OpenRouter API) |
 | Docker setup | Complex (SICStus install) | Simple (swipl base image) |
 | Event syntax | `eventE(X) :> body.` | `eventE(X) :> body.` (identical!) |
-| Message sending | `messageA(dest, send_message(ev(X), Me))` | Same, or `send(dest, ev(X))` |
+| Message sending | `messageA(dest, send_message(ev(X), Me))` | Same (DALI2 also accepts `send(dest, ev(X))` as shorthand) |
 | Internal events | `eventI :> body.` (config auto-generated) | `eventI :> body.` + optional `internal_event/5` (DALI2 extension) |
 | Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
-| FIPA messages | `confirm`/`disconfirm`/`propose`/`query_ref` + 8 others | `send(to, confirm(fact))` — 4 with special semantics, rest as handlers |
+| FIPA messages | `messageA(to, send_message(confirm(fact), Me))` | Same — 4 with special semantics, rest as handlers |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |

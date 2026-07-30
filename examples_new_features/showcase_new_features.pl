@@ -47,8 +47,8 @@
 %%  31.  Blackboard                              — sensor writes, sensor reads     [NEW]
 %%  32.  AI Oracle (if configured)               — coordinator (emergency analysis) [NEW]
 %%
-%% Run:   AGENT_FILE=examples/showcase.pl docker compose up --build
-%% Or:    swipl -l src/server.pl -g main -- 8080 examples/showcase.pl
+%% Run:   AGENT_FILE=examples_new_features/showcase_new_features.pl docker compose up --build
+%% Or:    swipl -l src/server.pl -g main -- 8080 examples_new_features/showcase_new_features.pl
 %%
 %% See EXAMPLES.md for step-by-step test commands.
 
@@ -102,7 +102,7 @@ internal_event(work_hours_check, 10, forever, true, in_date(time(0,0), time(23,5
 %% Condition-action rule (DALI2 ?> syntax, edge-triggered)
 believes(mode(cooling)) ?> (
     log("ON_CHANGE: Cooling mode just activated"),
-    send(logger, log_event(mode_change, thermostat, cooling))
+    messageA(logger, send_message(log_event(mode_change, thermostat, cooling), Me))
 ).
 
 %% External event handlers (DALI :> syntax with E suffix)
@@ -118,7 +118,7 @@ update_tempE(T) :>
     ( T > 30 ->
         retract_belief(mode(_)),
         assert_belief(mode(cooling)),
-        send(coordinator, notify(cooling_active, T))
+        messageA(coordinator, send_message(notify(cooling_active, T), Me))
     ;
         retract_belief(mode(_)),
         assert_belief(mode(idle))
@@ -168,16 +168,16 @@ read_tempE(T) :>
     %% Check if we previously learned about overheating
     ( learned(read_temp(_), overheating) ->
         log("WARNING: Previously learned overheating pattern!"),
-        send(coordinator, alert(repeated_overheating, T))
+        messageA(coordinator, send_message(alert(repeated_overheating, T), Me))
     ;
         true
     ),
-    send(coordinator, sensor_data(T)).
+    messageA(coordinator, send_message(sensor_data(T), Me)).
 
 %% Obtain goal (DALI obt_goal syntax)
 obt_goal(believes(calibrated(true))) :-
     log("Attempting calibration..."),
-    send(coordinator, calibration_request).
+    messageA(coordinator, send_message(calibration_request, Me)).
 
 %% External event handler
 calibration_doneE :>
@@ -238,13 +238,13 @@ tell(_, _, analyze(_)) :- true.
 %% have been received within 10 seconds of each other.
 sensor_dataE(_), alertE(_, _), within(10) :>
     log("MULTI-EVENT: Both sensor data and alert received within 10s!"),
-    send(logger, log_event(combined_alert, coordinator, multi_trigger)).
+    messageA(logger, send_message(log_event(combined_alert, coordinator, multi_trigger), Me)).
 
 %% External event handlers (DALI :> syntax with E suffix)
 sensor_dataE(T) :>
     log("Coordinator received sensor data: ~w", [T]),
     ( T > 40 ->
-        send(logger, log_event(high_temp, coordinator, T))
+        messageA(logger, send_message(log_event(high_temp, coordinator, T), Me))
     ; true ).
 
 alertE(Type, Value) :>
@@ -256,7 +256,7 @@ alertE(Type, Value) :>
 
 emergencyE(Type, Value) :>
     log("EMERGENCY: ~w = ~w", [Type, Value]),
-    send(logger, log_event(emergency, coordinator, [Type, Value])),
+    messageA(logger, send_message(log_event(emergency, coordinator, [Type, Value]), Me)),
     ( ai_available ->
         ask_ai(analyze(emergency(Type, Value)), Advice),
         log("AI advice for emergency: ~w", [Advice])
@@ -264,7 +264,7 @@ emergencyE(Type, Value) :>
 
 calibration_requestE :>
     log("Processing calibration request"),
-    send(sensor, calibration_done).
+    messageA(sensor, send_message(calibration_done, Me)).
 
 %% FIPA handlers
 confirmE(Fact) :>
@@ -281,23 +281,23 @@ reject_proposalE(Action) :>
 
 request_analysisE(Data) :>
     log("Requesting analysis, proposing to worker..."),
-    send(worker, propose(analyze(Data))).
+    messageA(worker, send_message(propose(analyze(Data)), Me)).
 
 test_rejectE :>
     log("Testing proposal rejection..."),
-    send(worker, propose(impossible_task)).
+    messageA(worker, send_message(propose(impossible_task), Me)).
 
 send_confirmE(Fact) :>
     log("Sending FIPA confirm(~w) to worker", [Fact]),
-    send(worker, confirm(Fact)).
+    messageA(worker, send_message(confirm(Fact), Me)).
 
 query_workerE(Q) :>
     log("Sending FIPA query_ref(~w) to worker", [Q]),
-    send(worker, query_ref(Q)).
+    messageA(worker, send_message(query_ref(Q), Me)).
 
 %% Export past rules (DALI ~/ syntax)
 %% When both alert and sensor_data in past, consume and react
-send(logger, log_event(past_consumed, coordinator, [Type, Value])) ~/
+messageA(logger, send_message(log_event(past_consumed, coordinator, [Type, Value]), Me)) ~/
     alert(Type, _), sensor_data(Value).
 
 %% Export past NOT done (DALI </ syntax)
@@ -332,7 +332,7 @@ ontology(eq_property(log_event, record)).
 ontology(symmetric(related_to)).
 
 %% External ontology file [NEW]
-ontology_file('examples/test_ontology.pl').
+ontology_file('examples/test_ontology.pl').  %% path relative to working directory
 
 %% External event handler
 log_eventE(Type, Source, Data) :>
@@ -401,12 +401,12 @@ analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
-    send(coordinator, inform(analysis_result(Data), complete)).
+    messageA(coordinator, send_message(inform(analysis_result(Data), complete), Me)).
 
 %% External event handler
 confirmE(Fact) :>
     log("FIPA CONFIRM received: ~w", [Fact]).
 
 %% Export past rule (DALI ~/ syntax)
-send(coordinator, inform(task_report(Task), complete)) ~/
+messageA(coordinator, send_message(inform(task_report(Task), complete), Me)) ~/
     task_done(Task), report_needed(Task).

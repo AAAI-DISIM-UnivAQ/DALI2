@@ -11,8 +11,8 @@
 detectE(Type, Location) :>
     log("Emergency detected: ~w at ~w", [Type, Location]),
     assert_belief(detected(Type, Location)),
-    send(coordinator, alarm(Type, Location)),
-    send(logger, log_event(detection, sensor, [Type, Location])).
+    messageA(coordinator, send_message(alarm(Type, Location), Me)),
+    messageA(logger, send_message(log_event(detection, sensor, [Type, Location]), Me)).
 
 :- agent(logger, [cycle(1)]).
 

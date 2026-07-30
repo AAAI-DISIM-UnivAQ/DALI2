@@ -1180,6 +1180,10 @@ call_condition(Name, has_past(Event)) :- !,
     (agent_past_event(Name, Event, _, _) -> true
     ; event_in_past(Name, Event)
     ).
+call_condition(Name, past(Event)) :- !,
+    (agent_past_event(Name, Event, _, _) -> true
+    ; event_in_past(Name, Event)
+    ).
 call_condition(Name, learned(Pattern, Outcome)) :- !,
     agent_learned_rt(Name, Pattern, Outcome).
 call_condition(Name, onto_match(T1, T2)) :- !,

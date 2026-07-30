@@ -12,15 +12,15 @@
 alarmE(Type, Location) :>
     log("ALARM: ~w at ~w", [Type, Location]),
     assert_belief(active_emergency(Type, Location)),
-    send(evacuator, dispatch(Type, Location)),
-    send(communicator, notify_public(Type, Location)),
-    send(responder, dispatch(Type, Location)),
-    send(logger, log_event(dispatch, coordinator, [Type, Location])).
+    messageA(evacuator, send_message(dispatch(Type, Location), Me)),
+    messageA(communicator, send_message(notify_public(Type, Location), Me)),
+    messageA(responder, send_message(dispatch(Type, Location), Me)),
+    messageA(logger, send_message(log_event(dispatch, coordinator, [Type, Location]), Me)).
 
 reportE(From, Status, Location) :>
     log("Report from ~w: ~w at ~w", [From, Status, Location]),
     assert_belief(report_received(From, Status, Location)),
-    send(logger, log_event(report, From, [Status, Location])).
+    messageA(logger, send_message(log_event(report, From, [Status, Location]), Me)).
 
 %% ============================================================
 %% EVACUATOR - Handles evacuation
@@ -30,8 +30,8 @@ reportE(From, Status, Location) :>
 dispatchE(Type, Location) :>
     log("Evacuation started at ~w for ~w", [Location, Type]),
     assert_belief(evacuating(Location)),
-    send(coordinator, report(evacuator, evacuation_complete, Location)),
-    send(logger, log_event(evacuation, evacuator, [Location, Type])).
+    messageA(coordinator, send_message(report(evacuator, evacuation_complete, Location), Me)),
+    messageA(logger, send_message(log_event(evacuation, evacuator, [Location, Type]), Me)).
 
 %% ============================================================
 %% RESPONDER - First response
@@ -41,8 +41,8 @@ dispatchE(Type, Location) :>
 dispatchE(Type, Location) :>
     log("Responding to ~w at ~w", [Type, Location]),
     assert_belief(responding(Location, Type)),
-    send(coordinator, report(responder, response_active, Location)),
-    send(logger, log_event(response, responder, [Location, Type])).
+    messageA(coordinator, send_message(report(responder, response_active, Location), Me)),
+    messageA(logger, send_message(log_event(response, responder, [Location, Type]), Me)).
 
 %% ============================================================
 %% COMMUNICATOR - Public notification
@@ -52,4 +52,4 @@ dispatchE(Type, Location) :>
 notify_publicE(Type, Location) :>
     log("Public alert: ~w at ~w", [Type, Location]),
     assert_belief(notified(Location)),
-    send(logger, log_event(notification, communicator, [Location, Type])).
+    messageA(logger, send_message(log_event(notification, communicator, [Location, Type]), Me)).

@@ -933,6 +933,8 @@ call_condition_local(believes(Fact)) :- !,
     ; agent_belief_rt(Other), agent_name(Name), ontology_match_local(Name, Fact, Other)).
 call_condition_local(has_past(Event)) :- !,
     (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
+call_condition_local(past(Event)) :- !,
+    (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
 call_condition_local(learned(Pattern, Outcome)) :- !, agent_learned_rt(Pattern, Outcome).
 call_condition_local(has_remember(Event)) :- !, agent_remember_ev(Event, _, _).
 call_condition_local(has_confirmed(Fact)) :- !, agent_past_event(confirmed(Fact), _, _).

@@ -2,15 +2,16 @@
 
 This guide explains all included examples, how to run them, and the commands to test each feature.
 
-DALI2 now supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework, plus the `?>` operator for DALI2's edge-triggered condition-action rules. Each agent runs as a **separate OS process**.
+DALI2 supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework, plus the `?>` operator for DALI2's edge-triggered condition-action rules. Agents communicate using the FIPA-style primitive `messageA(Dest, send_message(Content, Me))`. Each agent runs as a **separate OS process**.
 
 ## Table of Contents
 
 - [Running Examples](#running-examples)
 - [1. Smart Agriculture (`agriculture.pl`)](#1-smart-agriculture)
 - [2. Emergency Response (`emergency.pl`)](#2-emergency-response)
-- [3. Feature Showcase (`showcase.pl`)](#3-feature-showcase)
-- [4. Distributed Emergency (`emergency_sensors.pl` + `emergency_responders.pl`)](#4-distributed-emergency)
+- [3. Original DALI Features Showcase (`showcase_original_features.pl`)](#3-original-dali-features-showcase)
+- [4. New Features Showcase (`showcase_new_features.pl`)](#4-new-features-showcase)
+- [5. Distributed Emergency (`emergency_sensors.pl` + `emergency_responders.pl`)](#5-distributed-emergency)
 - [API Quick Reference](#api-quick-reference)
 
 ---
@@ -111,14 +112,14 @@ curl -X POST http://localhost:8080/api/send \
 
 **File:** `examples/agriculture.pl` — Ported from the original DALI case study (`dalia/case_study_smart_agriculture`).
 
-A precision agriculture system with 6 agents. Sensors validate readings via **internal events** (only abnormal readings are forwarded), the crop advisor decides actions (irrigate, reduce water, advisory), and the farmer receives notifications.
+A precision agriculture system with 6 agents. Sensors validate readings inline (only abnormal readings are forwarded), the crop advisor decides actions (irrigate, reduce water, advisory), and the farmer receives notifications. All communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
 
 ### Agents
 
 | Agent | Role |
 |-------|------|
-| `soil_sensor` | Receives soil readings, validates via internal events (alert vs normal) |
-| `weather_monitor` | Receives weather data, validates via internal events (risk vs normal) |
+| `soil_sensor` | Receives soil readings, validates and forwards abnormal ones |
+| `weather_monitor` | Receives weather data, validates and forwards risks |
 | `crop_advisor` | Analyzes reports with AI, decides: irrigate / reduce_water / advisory |
 | `irrigation_controller` | Activates irrigation or reduces water supply |
 | `farmer_agent` | Receives advisories and status updates |
@@ -126,10 +127,10 @@ A precision agriculture system with 6 agents. Sensors validate readings via **in
 
 ### Features Demonstrated
 
-- **Internal events** — sensors validate readings (soil_alert_check, soil_normal_check, weather_risk_check, weather_normal_check)
 - **Reactive rules** (`E` suffix + `:>`) — all agents react to incoming events
+- **Inline validation** — sensors check thresholds directly in the event handler body
 - **Belief management** — irrigation controller tracks active/reduced state per field
-- **Multi-agent communication** — message chains across 4+ agents
+- **Multi-agent communication** — `messageA`/`send_message` chains across 4+ agents
 - **AI Oracle** — crop_advisor uses AI for soil/weather analysis (if API key configured)
 - **Conditional logic** — crop_advisor branches on moisture/pH/temperature thresholds
 
@@ -163,7 +164,7 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 
 **Expected flow:**
 ```
-soil_sensor: stores soil_state → internal soil_alert_check fires (25 < 30)
+soil_sensor: receives read_soil(25, 6.5, north_field) → validates inline (25 < 30)
 soil_sensor → crop_advisor: soil_report(25, 6.5, north_field)
 crop_advisor: low moisture → irrigate
 crop_advisor → irrigation_controller: irrigate(north_field)
@@ -183,7 +184,7 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""soil_sensor"",""content"":""read_soil(50, 6.8, east_field)""}"
 ```
 
-**Expected:** internal soil_normal_check fires — "SOIL NORMAL" logged, no report sent.
+**Expected:** "SOIL NORMAL" logged inline, no report sent.
 
 ```powershell
 # 4. Drought risk (temp > 38) → emergency irrigation
@@ -211,13 +212,13 @@ curl.exe http://localhost:8080/api/beliefs?agent=farmer_agent
 
 **File:** `examples/emergency.pl` — Ported from the original DALI emergency example (`dalia/example`).
 
-A 9-agent emergency response system. The sensor validates alarms via **internal events** (real vs false alarm). The coordinator uses **multi-step coordination** with internal events: it waits for equipment from the manager before dispatching the responder. The communicator notifies person agents (mary, john).
+A 9-agent emergency response system. The sensor validates alarms inline (real vs false alarm). The coordinator uses **internal events** (default fire-once behavior) for multi-step coordination: it waits for equipment from the manager before dispatching the responder, and waits for evacuation + response completion before declaring the emergency resolved. All communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
 
 ### Agents
 
 | Agent | Role |
 |-------|------|
-| `sensor` | Detects events, validates alarms via internal events (real vs false) |
+| `sensor` | Detects events, validates alarms inline (real vs false) |
 | `coordinator` | Multi-step dispatch: AI analysis, waits for equipment, tracks done |
 | `manager` | Determines equipment (firetruck/bulldozer/respirator) based on type |
 | `evacuator` | Handles evacuation, reports back |
@@ -228,7 +229,8 @@ A 9-agent emergency response system. The sensor validates alarms via **internal 
 
 ### Features Demonstrated
 
-- **Internal events** — sensor: alarm validation (check_alarm, check_false_alarm); coordinator: dispatch_response (waits for equipment + location), check_done (waits for evacuated + responded)
+- **Internal events** (default fire-once) — coordinator: `dispatch_responseI` (waits for equipment + location), `check_doneI` (waits for evacuated + responded)
+- **Inline validation** — sensor checks alarm type directly in the event handler body
 - **Reactive rules** (`E` suffix + `:>`) — full chain from detection to resolution
 - **Belief management** — coordinator tracks pending_location, equipment_ready, evacuated, responded
 - **Multi-step coordination** — responder is only dispatched after manager provides equipment
@@ -262,15 +264,15 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 
 **Expected flow:**
 ```
-sensor: stores detected(fire, building_a) → internal check_alarm fires (fire ∈ alarm list)
+sensor: receives sense(fire, building_a) → validates inline (fire ∈ alarm list)
 sensor → coordinator: alarm(fire, building_a)
 coordinator → evacuator + communicator + manager (dispatches all three)
 manager: fire → firetruck → coordinator: equipped(firetruck)
 communicator → mary + john: message(fire, building_a)
 evacuator → coordinator: evacuated(building_a)
-coordinator internal dispatch_response: location + equipment ready → responder: respond(firetruck, building_a)
+coordinator internal dispatch_responseI: location + equipment ready → responder: respond(firetruck, building_a)
 responder → coordinator: responded(building_a)
-coordinator internal check_done: evacuated + responded → "EMERGENCY RESOLVED"
+coordinator internal check_doneI: evacuated + responded → "EMERGENCY RESOLVED"
 ```
 
 ```powershell
@@ -278,7 +280,7 @@ coordinator internal check_done: evacuated + responded → "EMERGENCY RESOLVED"
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""sense(wind, park)""}"
 ```
 
-**Expected:** internal check_false_alarm fires — "FALSE ALARM: wind at park". No alarm sent to coordinator.
+**Expected:** inline validation fails (wind not in alarm list) — "FALSE ALARM: wind at park". No alarm sent to coordinator.
 
 ```powershell
 # 3. Earthquake (different equipment)
@@ -295,11 +297,54 @@ curl.exe http://localhost:8080/api/past?agent=coordinator
 
 ---
 
-## 3. Feature Showcase
+## 3. Original DALI Features Showcase
 
-**File:** `examples/showcase.pl`
+**File:** `examples/showcase_original_features.pl`
 
-Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible syntax** (`:>`, `:<`, `?>`, `~/`, `</`, `?/`, `:~` operators and `E`/`I`/`A` suffixes). This is the comprehensive reference example that covers every rule type, DSL predicate, and advanced feature.
+A comprehensive showcase using **only standard DALI syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`, `:~`), suffixes (`E`, `I`, `A`, `N`, `P`), and FIPA-style communication (`messageA(Dest, send_message(Content, Me))`) that work in the original DALI framework. Internal events use the default fire-once behavior (no `internal_event/5` declarations). No DALI2-only extensions (`?>`, `every`, `when`, `helper`, `learn_from`, `ontology`, `on_proposal`, `bb_write`/`bb_read`/`bb_remove`). This is the recommended starting point for students learning DALI semantics.
+
+### Agents
+
+| Agent | Role | Features Demonstrated |
+|-------|------|----------------------|
+| `thermostat` | Temperature control | Internal events (default fire-once), constraints |
+| `sensor` | Sensor readings | Past lifetime/remember, goals |
+| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events, goals, residue goals, export past rules, proposal sending, AI oracle |
+| `logger` | Semantic logging | Reactive rules, belief tracking |
+| `worker` | Task execution | FIPA proposal handling (`proposeE`), actions (`A` suffix), preconditions (`:<`), export past rules, told rules (body conditions) |
+
+### Features Demonstrated
+
+- **Reactive rules** (`E` suffix + `:>`) — all agents
+- **Internal events** (`I` suffix + `:>`, default fire-once) — thermostat
+- **Constraints** (`:~` operator) — thermostat (temp < 50)
+- **Goals** (`obt_goal`/`test_goal`) — sensor (calibration), coordinator (alert test)
+- **Tell/told filtering** with priority queue — coordinator, worker
+- **FIPA messages** — confirm, inform, query_ref, propose, accept/reject_proposal
+- **Multi-events** (`E` suffix conjunction + `within/1`) — coordinator
+- **Export past rules** (`~/`, `</`) — coordinator, worker
+- **Residue goals** (`tenta_residuo`/`evp`) — coordinator
+- **Past lifetime + remember tier** — sensor
+- **Actions** (`A` suffix) with preconditions (`:<`) — worker
+- **Beliefs** — all agents
+- **AI Oracle** — coordinator (if API key configured, graceful fallback)
+
+### Test Commands
+
+```bash
+# Start
+swipl -l src/server.pl -g main -- 8080 examples/showcase_original_features.pl
+```
+
+See [Section 4 (New Features Showcase)](#4-new-features-showcase) for the full step-by-step test procedure — the same commands apply, since both showcases share the same agent structure and event names.
+
+---
+
+## 4. New Features Showcase
+
+**File:** `examples_new_features/showcase_new_features.pl`
+
+The comprehensive reference example covering **all 32 DALI2 features**, including DALI2-only extensions: `internal_event/5` declarations (interval, change, trigger, between), `every`, `when`, `helper`, `on_proposal`, `learn_from`, `ontology`/`ontology_file`, `bb_read`/`bb_write`/`bb_remove`, and `ask_ai`. Communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
 
 ### Agents
 
@@ -307,7 +352,7 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible 
 |-------|------|----------------------|
 | `thermostat` | Temperature control | Internal events (interval, change, trigger, between), constraints, condition-action (`?>`) |
 | `sensor` | Sensor readings | Periodic tasks, learning, blackboard, past lifetime/remember |
-| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events (delta-t), goals, residue goals, export past rules, proposal sending, AI oracle |
+| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events, goals, residue goals, export past rules, proposal sending, AI oracle |
 | `logger` | Semantic logging | Ontology (inline + external file), helpers, condition monitor |
 | `worker` | Task execution | Action proposals (on_proposal), FIPA responses, export past rules, told rules (body conditions) |
 
@@ -320,11 +365,11 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible 
 | 3 | **Internal event change** | thermostat | Send `update_temp` — `startup_diagnostic` counter resets |
 | 4 | **Internal event trigger** | thermostat | `cooling_monitor` fires only when `mode(cooling)` |
 | 5 | **Internal event between** | thermostat | `work_hours_check` fires in time window |
-| 6 | **Periodic tasks** | sensor | Automatic — heartbeat every 15 seconds |
+| 6 | **Periodic tasks** (`every`) | sensor | Automatic — heartbeat every 15 seconds |
 | 7 | **Condition monitors** (`when`) | logger | Warns when log volume > 10 |
 | 8 | **Condition-action** (`?>`) | thermostat | Edge-triggered when cooling mode activates |
 | 9 | **Present events** | — | Atomic observations (cannot be defined with `:-`) |
-| 10 | **Multi-events with delta-t** | coordinator | Both `sensor_data` + `alert` within 10s → fires |
+| 10 | **Multi-events with `within/1`** | coordinator | Both `sensor_data` + `alert` within 10s → fires |
 | 11 | **Constraints** | thermostat | Temperature > 50 triggers violation |
 | 12 | **Goals (achieve)** | sensor | Calibration goal keeps trying until achieved |
 | 13 | **Goals (test)** | coordinator | Tests if alerts received |
@@ -352,7 +397,7 @@ Demonstrates **all 32 DALI2 features** in a single file using **DALI-compatible 
 
 ```bash
 # Start the showcase
-swipl -l src/server.pl -g main -- 8080 examples/showcase.pl
+swipl -l src/server.pl -g main -- 8080 examples_new_features/showcase_new_features.pl
 ```
 
 #### Via Web UI
@@ -362,7 +407,7 @@ Open http://localhost:8080 and use the **Send Event** panel. Steps 1–2 use "Se
 | Step | To | Content | Expected |
 |------|----|---------|----------|
 | 1 | `sensor` | `read_temp(85)` | Learning, blackboard, cooling mode, constraint violation |
-| 2 | `sensor` | `read_temp(90)` | Learned pattern warning, multi-event with delta-t fires |
+| 2 | `sensor` | `read_temp(90)` | Learned pattern warning, multi-event with `within(10)` fires |
 | 10 | `thermostat` | `update_temp(20)` | Constraint resolves, mode → idle |
 
 Steps 3–9 inject events directly into the coordinator (FIPA, export past, residue goals). Use curl or the REST API for these — see below.
@@ -386,7 +431,7 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 **Expected:**
 - Sensor reads 85, writes to blackboard, sends `sensor_data(85)` to coordinator
 - **Learning**: learns overheating pattern
-- **On_change**: "Cooling mode just activated" (edge-triggered, fires once)
+- **Condition-action (?>)**: "Cooling mode just activated" (edge-triggered, fires once)
 - **Triggered internal**: `cooling_monitor` starts firing (mode=cooling)
 - **Constraint violated**: 85 > 50 → emergency sent to coordinator
 - **Change condition**: thermostat's `startup_diagnostic` counter resets (current_temp changed)
@@ -394,13 +439,13 @@ curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/js
 - Logger receives log_event → **ontology** matching works
 
 ```powershell
-# STEP 2: Send second reading (triggers learned pattern + multi-event with delta-t + export past)
+# STEP 2: Send second reading (triggers learned pattern + multi-event + export past)
 curl.exe -X POST http://localhost:8080/api/send -H "Content-Type: application/json" -d "{""to"":""sensor"",""content"":""read_temp(90)""}"
 ```
 
 **Expected:**
 - **Learned knowledge**: "WARNING: Previously learned overheating pattern!"
-- **Multi-event with delta-t**: `sensor_data` + `alert` both in past within 10s → fires
+- **Multi-event (`within(10)`)**: `sensor_data` + `alert` both in past within 10s → fires
 - **Export past (`~/`)**: `alert` + `sensor_data` consumed from past memory
 
 ```powershell
@@ -475,7 +520,7 @@ curl.exe http://localhost:8080/api/blackboard
 
 ---
 
-## 4. Distributed Emergency
+## 5. Distributed Emergency
 
 **Files:** `examples/emergency_sensors.pl` + `examples/emergency_responders.pl`
 
@@ -587,5 +632,5 @@ curl.exe -X POST http://localhost:8080/api/start -H "Content-Type: application/j
 curl.exe -X POST http://localhost:8080/api/stop -H "Content-Type: application/json" -d "{""agent"":""AGENT""}"
 
 # Reload agent file
-curl.exe -X POST http://localhost:8080/api/reload -H "Content-Type: application/json" -d "{""file"":""examples/showcase.pl""}"
+curl.exe -X POST http://localhost:8080/api/reload -H "Content-Type: application/json" -d "{""file"":""examples/agriculture.pl""}"
 ```
