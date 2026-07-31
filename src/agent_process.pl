@@ -815,6 +815,9 @@ execute_body_local(Name, reject_proposal(To, Action)) :- !,
 execute_body_local(Name, learn(Pattern, Outcome)) :- !,
     assert(agent_learned_rt(Pattern, Outcome)),
     log_local(Name, "Learned: ~w -> ~w", [Pattern, Outcome]).
+execute_body_local(Name, learn_from(Pattern, Outcome)) :- !,
+    assert(agent_learned_rt(Pattern, Outcome)),
+    log_local(Name, "Learned: ~w -> ~w", [Pattern, Outcome]).
 execute_body_local(_, learned(Pattern, Outcome)) :- !, agent_learned_rt(Pattern, Outcome).
 execute_body_local(Name, forget(Pattern)) :- !,
     retractall(agent_learned_rt(Pattern, _)), log_local(Name, "Forgot: ~w", [Pattern]).
@@ -826,23 +829,54 @@ execute_body_local(Name, onto_match(Term1, Term2)) :- !, ontology_match_local(Na
 execute_body_local(Name, achieve(Goal)) :- !,
     goal_canonical_id_local(Goal, GoalId),
     (agent_goal_status(GoalId, achieved) -> true ;
-        (catch(call_condition_local(Goal), _, fail) ->
-            retractall(agent_goal_status(GoalId, _)),
-            assert(agent_goal_status(GoalId, achieved)),
-            retractall(agent_residue_goal(GoalId, _)),
-            log_local(Name, "Inline goal achieved: ~w", [Goal]),
-            get_time(Stamp), T is truncate(Stamp * 1000),
-            record_past_local(goal_achieved(Goal), T)
+        (loader:agent_goal(Name, achieve, Goal, Plan), Plan \== true ->
+            (catch(execute_body_local(Name, Plan), _, fail) ->
+                retractall(agent_goal_status(GoalId, _)),
+                assert(agent_goal_status(GoalId, achieved)),
+                retractall(agent_residue_goal(GoalId, _)),
+                log_local(Name, "Goal achieved: ~w", [Goal]),
+                get_time(Stamp), T is truncate(Stamp * 1000),
+                record_past_local(goal_achieved(Goal), T)
+            ;
+                (agent_residue_goal(GoalId, _) -> true ;
+                    assert(agent_residue_goal(GoalId, Goal)),
+                    log_local(Name, "Goal queued as residue: ~w", [Goal]))
+            )
         ;
-            (agent_residue_goal(GoalId, _) -> true ;
-                assert(agent_residue_goal(GoalId, Goal)),
-                log_local(Name, "Goal queued as residue: ~w", [Goal]))
+            (catch(call_condition_local(Goal), _, fail) ->
+                retractall(agent_goal_status(GoalId, _)),
+                assert(agent_goal_status(GoalId, achieved)),
+                retractall(agent_residue_goal(GoalId, _)),
+                log_local(Name, "Inline goal achieved: ~w", [Goal]),
+                get_time(Stamp), T is truncate(Stamp * 1000),
+                record_past_local(goal_achieved(Goal), T)
+            ;
+                (agent_residue_goal(GoalId, _) -> true ;
+                    assert(agent_residue_goal(GoalId, Goal)),
+                    log_local(Name, "Goal queued as residue: ~w", [Goal]))
+            )
         )).
 execute_body_local(Name, reset_goal(Goal)) :- !,
     goal_canonical_id_local(Goal, GoalId),
     retractall(agent_goal_status(GoalId, _)),
     retractall(agent_residue_goal(GoalId, _)),
     log_local(Name, "Goal reset: ~w", [Goal]).
+%% test_goal_check(Goal) - Check test goal condition (DALI postfix T in body)
+execute_body_local(Name, test_goal_check(Goal)) :- !,
+    goal_canonical_id_local(Goal, GoalId),
+    (agent_goal_status(GoalId, succeeded) -> true ;
+        ( (loader:agent_goal(Name, test, Goal, Plan)
+          ; loader:agent_goal(Name, test, (Goal, _ExtraCond), Plan)
+          ) ->
+            (catch(execute_body_local(Name, Plan), _, fail) ->
+                assert(agent_goal_status(GoalId, succeeded)),
+                log_local(Name, "Test goal succeeded: ~w", [Goal])
+            ;
+                log_local(Name, "Test goal not satisfied: ~w", [Goal])
+            )
+        ;
+            log_local(Name, "Test goal not defined: ~w", [Goal])
+        )).
 
 %% Blackboard — via Redis
 execute_body_local(_, bb_read(Pattern)) :- !,
@@ -980,6 +1014,10 @@ call_condition_local(learned(Pattern, Outcome)) :- !, agent_learned_rt(Pattern, 
 call_condition_local(has_remember(Event)) :- !, agent_remember_ev(Event, _, _).
 call_condition_local(has_confirmed(Fact)) :- !, agent_past_event(confirmed(Fact), _, _).
 call_condition_local(bb_read(Pattern)) :- !, redis_comm:redis_bb_read(Pattern).
+%% Goal condition: check if goal has been achieved
+call_condition_local(Goal) :-
+    goal_canonical_id_local(Goal, GoalId),
+    agent_goal_status(GoalId, achieved), !.
 %% Resolve user predicates / belief facts against the per-agent KB (DALI compat),
 %% otherwise fall back to global builtins (arithmetic, comparisons, ...).
 call_condition_local(Cond) :-

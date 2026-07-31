@@ -1043,6 +1043,10 @@ execute_body(Name, reply_to(Content)) :- !,
 execute_body(Name, learn(Pattern, Outcome)) :- !,
     assert(agent_learned_rt(Name, Pattern, Outcome)),
     log_agent(Name, "Learned: ~w -> ~w", [Pattern, Outcome]).
+% learn_from(Pattern, Outcome) - DALI2 alias for learn/2
+execute_body(Name, learn_from(Pattern, Outcome)) :- !,
+    assert(agent_learned_rt(Name, Pattern, Outcome)),
+    log_agent(Name, "Learned: ~w -> ~w", [Pattern, Outcome]).
 
 % learned(Pattern, Outcome) - Check if agent has learned something
 execute_body(Name, learned(Pattern, Outcome)) :- !,
@@ -1063,20 +1067,56 @@ execute_body(Name, achieve(Goal)) :- !,
     (agent_goal_status(Name, GoalId, achieved) ->
         true
     ;
-        (catch(call_condition(Name, Goal), _, fail) ->
-            retractall(agent_goal_status(Name, GoalId, _)),
-            assert(agent_goal_status(Name, GoalId, achieved)),
-            retractall(agent_residue_goal(Name, GoalId, _)),
-            log_agent(Name, "Inline goal achieved: ~w", [Goal]),
-            get_time(Stamp), T is truncate(Stamp * 1000),
-            record_past(Name, goal_achieved(Goal), T)
-        ;
-            (agent_residue_goal(Name, GoalId, _) ->
-                true
+        %% Try executing the goal's plan first (if one exists)
+        (loader:agent_goal(Name, achieve, Goal, Plan), Plan \== true ->
+            (catch(execute_body(Name, Plan), _, fail) ->
+                %% Plan succeeded — mark goal as achieved
+                retractall(agent_goal_status(Name, GoalId, _)),
+                assert(agent_goal_status(Name, GoalId, achieved)),
+                retractall(agent_residue_goal(Name, GoalId, _)),
+                log_agent(Name, "Goal achieved: ~w", [Goal]),
+                get_time(Stamp), T is truncate(Stamp * 1000),
+                record_past(Name, goal_achieved(Goal), T)
             ;
-                assert(agent_residue_goal(Name, GoalId, Goal)),
-                log_agent(Name, "Goal queued as residue: ~w", [Goal])
+                (agent_residue_goal(Name, GoalId, _) -> true ;
+                    assert(agent_residue_goal(Name, GoalId, Goal)),
+                    log_agent(Name, "Goal queued as residue: ~w", [Goal]))
             )
+        ;
+            %% No plan — check condition directly
+            (catch(call_condition(Name, Goal), _, fail) ->
+                retractall(agent_goal_status(Name, GoalId, _)),
+                assert(agent_goal_status(Name, GoalId, achieved)),
+                retractall(agent_residue_goal(Name, GoalId, _)),
+                log_agent(Name, "Inline goal achieved: ~w", [Goal]),
+                get_time(Stamp), T is truncate(Stamp * 1000),
+                record_past(Name, goal_achieved(Goal), T)
+            ;
+                (agent_residue_goal(Name, GoalId, _) -> true ;
+                    assert(agent_residue_goal(Name, GoalId, Goal)),
+                    log_agent(Name, "Goal queued as residue: ~w", [Goal]))
+            )
+        )
+    ).
+
+% test_goal_check(Goal) - Check if a test goal's condition holds (DALI postfix T in body)
+execute_body(Name, test_goal_check(Goal)) :- !,
+    goal_canonical_id(Goal, GoalId),
+    (agent_goal_status(Name, GoalId, succeeded) ->
+        true
+    ;
+        %% Try matching test goal with exact Goal or (Goal, ExtraCond) form
+        ( (loader:agent_goal(Name, test, Goal, Plan)
+          ; loader:agent_goal(Name, test, (Goal, _ExtraCond), Plan)
+          ) ->
+            (catch(execute_body(Name, Plan), _, fail) ->
+                assert(agent_goal_status(Name, GoalId, succeeded)),
+                log_agent(Name, "Test goal succeeded: ~w", [Goal])
+            ;
+                log_agent(Name, "Test goal not satisfied: ~w", [Goal])
+            )
+        ;
+            log_agent(Name, "Test goal not defined: ~w", [Goal])
         )
     ).
 
@@ -1230,6 +1270,10 @@ call_condition(Name, has_confirmed(Fact)) :- !,
     agent_past_event(Name, confirmed(Fact), _, _).
 call_condition(_Name, bb_read(Pattern)) :- !,
     blackboard:bb_get(Pattern).
+%% Goal condition: check if goal has been achieved
+call_condition(Name, Goal) :-
+    goal_canonical_id(Goal, GoalId),
+    agent_goal_status(Name, GoalId, achieved), !.
 call_condition(_, Cond) :-
     call(Cond).
 

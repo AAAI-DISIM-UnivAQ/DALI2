@@ -292,6 +292,16 @@ transform_body(Term, present(BaseTerm)) :-
 transform_body(Term, has_remember(BaseTerm)) :-
     nonvar(Term),
     strip_suffix_term(Term, BaseTerm, 'R'), !.
+%% Obtain goal (G suffix) in body — trigger goal execution
+%%   myGoalG(X) → achieve(myGoal(X))
+transform_body(Term, achieve(BaseTerm)) :-
+    nonvar(Term),
+    strip_suffix_term(Term, BaseTerm, 'G'), !.
+%% Test goal (T suffix) in body — test if goal condition holds
+%%   myGoalT(X) → test_goal_check(myGoal(X))
+transform_body(Term, test_goal_check(BaseTerm)) :-
+    nonvar(Term),
+    strip_suffix_term(Term, BaseTerm, 'T'), !.
 transform_body(Term, Term).
 
 %% fipa_performative(?Name) — list of FIPA-ACL performatives supported in
