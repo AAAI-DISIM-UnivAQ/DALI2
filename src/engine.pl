@@ -328,7 +328,66 @@ handle_fipa_semantics(Name, From, propose(Action), _T) :- !,
 handle_fipa_semantics(Name, From, propose(Action, _Content), _T) :- !,
     fire_proposal_handlers(Name, From, Action).
 
+%% agree auto-response (DALI compatibility):
+%%   If ground and meta_agree/2 succeeds → inform(agree(X), values(yes))
+%%   If ground and meta_agree/2 fails    → inform(agree(X), values(no))
+%%   If not ground                       → refuse(agree(variable), motivation(refused_variables))
+%% meta_agree/2 is user-defined; defaults to checking if X is a belief.
+handle_fipa_semantics(Name, From, agree(X), _T) :- !,
+    ( ground(X) ->
+        ( meta_agree(Name, X) ->
+            communication:send(Name, From, inform(agree(X), values(yes))),
+            log_agent(Name, "Agree auto-response: yes for ~w", [X])
+        ;
+            communication:send(Name, From, inform(agree(X), values(no))),
+            log_agent(Name, "Agree auto-response: no for ~w", [X])
+        )
+    ;
+        communication:send(Name, From, refuse(agree(variable), motivation(refused_variables))),
+        log_agent(Name, "Agree auto-response: refused (unbound)", [])
+    ).
+
+%% refuse auto-response (DALI compatibility):
+%%   Records the refused fact in past and replies with reply(received(X)).
+handle_fipa_semantics(Name, From, refuse(X), T) :- !,
+    record_past(Name, refused(X), T),
+    communication:send(Name, From, reply(received(X))),
+    log_agent(Name, "Refuse auto-response: reply(received(~w)) to ~w", [X, From]).
+
+%% cfp auto-response (DALI compatibility):
+%%   If call_meta_execute_cfp/4 succeeds → propose(Action, [Response])
+%%   Otherwise → no auto-response (user handler fires via fire_handlers)
+%% call_meta_execute_cfp/4 is user-defined; if not defined, fall back to
+%% checking if Action is a belief, returning the belief as response.
+handle_fipa_semantics(Name, From, cfp(Action, Content), _T) :- !,
+    ( catch(call_meta_execute_cfp(Name, Action, Content, Response), _, fail) ->
+        communication:send(Name, From, propose(Action, [Response])),
+        log_agent(Name, "Cfp auto-response: propose(~w, [~w]) to ~w", [Action, Response, From])
+    ;
+        %% Fallback: check if Action matches any belief
+        ( agent_belief_rt(Name, Action) ->
+            communication:send(Name, From, propose(Action, [Action])),
+            log_agent(Name, "Cfp auto-response (fallback): propose(~w, [~w]) to ~w", [Action, Action, From])
+        ;
+            log_agent(Name, "Cfp: no auto-response for ~w (no matching belief)", [Action])
+        )
+    ).
+
 handle_fipa_semantics(_, _, _, _).  % Other FIPA types: no special semantics
+
+%% meta_agree(+Name, +X) - Check if agent agrees with X.
+%% User-defined predicate; defaults to checking if X is a belief.
+:- dynamic meta_agree/2.
+meta_agree(Name, X) :-
+    agent_belief_rt(Name, X), !.
+meta_agree(_, X) :-
+    callable(X), catch(call(X), _, fail), !.
+
+%% call_meta_execute_cfp(+Name, +Action, +Content, -Response) - Execute cfp.
+%% User-defined predicate; defaults to checking beliefs.
+:- dynamic call_meta_execute_cfp/4.
+call_meta_execute_cfp(Name, Action, _Content, Action) :-
+    agent_belief_rt(Name, Action), !.
 
 %% fire_proposal_handlers(+Name, +From, +Action) - Fire on_proposal handlers
 fire_proposal_handlers(Name, From, Action) :-

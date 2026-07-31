@@ -218,7 +218,57 @@ handle_fipa_semantics_local(Name, From, propose(Action), _T) :- !,
     fire_proposal_handlers_local(Name, From, Action).
 handle_fipa_semantics_local(Name, From, propose(Action, _Content), _T) :- !,
     fire_proposal_handlers_local(Name, From, Action).
+
+%% agree auto-response (DALI compatibility)
+handle_fipa_semantics_local(Name, From, agree(X), _T) :- !,
+    ( ground(X) ->
+        ( meta_agree_local(Name, X) ->
+            redis_comm:redis_publish_linda(Name, From, inform(agree(X), values(yes))),
+            log_local(Name, "Agree auto-response: yes for ~w", [X])
+        ;
+            redis_comm:redis_publish_linda(Name, From, inform(agree(X), values(no))),
+            log_local(Name, "Agree auto-response: no for ~w", [X])
+        )
+    ;
+        redis_comm:redis_publish_linda(Name, From, refuse(agree(variable), motivation(refused_variables))),
+        log_local(Name, "Agree auto-response: refused (unbound)", [])
+    ).
+
+%% refuse auto-response (DALI compatibility)
+handle_fipa_semantics_local(Name, From, refuse(X), T) :- !,
+    record_past_local(refused(X), T),
+    redis_comm:redis_publish_linda(Name, From, reply(received(X))),
+    log_local(Name, "Refuse auto-response: reply(received(~w)) to ~w", [X, From]).
+
+%% cfp auto-response (DALI compatibility)
+handle_fipa_semantics_local(Name, From, cfp(Action, Content), _T) :- !,
+    ( catch(call_meta_execute_cfp_local(Name, Action, Content, Response), _, fail) ->
+        redis_comm:redis_publish_linda(Name, From, propose(Action, [Response])),
+        log_local(Name, "Cfp auto-response: propose(~w, [~w]) to ~w", [Action, Response, From])
+    ;
+        ( agent_belief_rt(Action) ->
+            redis_comm:redis_publish_linda(Name, From, propose(Action, [Action])),
+            log_local(Name, "Cfp auto-response (fallback): propose(~w, [~w]) to ~w", [Action, Action, From])
+        ;
+            log_local(Name, "Cfp: no auto-response for ~w (no matching belief)", [Action])
+        )
+    ).
+
 handle_fipa_semantics_local(_, _, _, _).
+
+%% meta_agree_local(+Name, +X) - Check if agent agrees with X.
+:- dynamic meta_agree_local/2.
+meta_agree_local(_Name, X) :-
+    agent_belief_rt(X), !.
+meta_agree_local(_, X) :-
+    callable(X), agent_name(Name), has_user_definition_local(Name, X), !,
+    solve_user_goal_local(Name, X).
+meta_agree_local(_, X) :- callable(X), catch(call(X), _, fail), !.
+
+%% call_meta_execute_cfp_local(+Name, +Action, +Content, -Response)
+:- dynamic call_meta_execute_cfp_local/4.
+call_meta_execute_cfp_local(_Name, Action, _Content, Action) :-
+    agent_belief_rt(Action), !.
 
 fire_proposal_handlers_local(Name, From, Action) :-
     forall(
