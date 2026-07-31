@@ -149,9 +149,9 @@ remember_event_mod(sensor_data(_), number(10), last).
 %% Periodic task: heartbeat every 15 seconds [NEW]
 every(15, log("Sensor heartbeat")).
 
-%% Present events are atomic environmental observations.
-%% They cannot be defined with :- (they are set by the environment).
-%% Use them as conditions in reactive rules instead:
+%% Present events (suffix N) are available as present(event) during event processing.
+%% They cannot be defined with :- (they are set when an event arrives).
+%% Use them as subgoals in reactive rules to reason about the present event:
 read_tempE(T) :>
     bb_write(environment(temp, T)),
     log("Sensor stored temp ~w on blackboard", [T]).

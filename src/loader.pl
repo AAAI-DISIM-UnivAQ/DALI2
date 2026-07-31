@@ -251,7 +251,7 @@ transform_body(messageA(Dest, send_message(Content)), send(Dest, Content)) :- !.
 %%   messageA(To, inform(Content, Me))             → send(To, inform(Content))
 %%   messageA(To, inform(Content, Meta, Me))       → send(To, inform(Content, Meta))
 %%   messageA(To, confirm(Fact, Me))               → send(To, confirm(Fact))
-%%   messageA(To, propose(Action, Me))             → send(To, propose(Action))
+%%   messageA(To, propose(Action, Content, Me))    → send(To, propose(Action, Content))
 %%   etc. for all FIPA performatives listed in fipa_performative/1
 transform_body(messageA(Dest, Perf), send(Dest, Stripped)) :-
     nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
@@ -289,6 +289,7 @@ transform_body(Term, Term).
 %% the "original DALI" form B syntax: messageA(To, perform(Content..., Me))
 %% where Me (sender) is the last argument inside the performative.
 %% send_message is NOT listed here — it has its own dedicated transform clauses.
+%% cfp and reply are receive-only in DALI; DALI2 supports send too.
 fipa_performative(inform).
 fipa_performative(confirm).
 fipa_performative(disconfirm).
@@ -301,6 +302,8 @@ fipa_performative(refuse).
 fipa_performative(failure).
 fipa_performative(cancel).
 fipa_performative(execute_proc).
+fipa_performative(cfp).
+fipa_performative(reply).
 
 parse_past_list((A, B), [A | Rest]) :- !,
     parse_past_list(B, Rest).

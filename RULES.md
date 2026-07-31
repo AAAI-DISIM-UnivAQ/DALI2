@@ -298,7 +298,7 @@ believes(battery_level(L)), L < 20 ?> (
 - `when` fires **every cycle** while the condition is true (level-triggered)
 - `?>` fires **once** when the condition becomes true (edge-triggered), then waits for it to become false before it can fire again
 
-**Why `?>` and not `:<`?** In the original DALI, `:<` is the **action precondition** operator (`actionA :< precondition.`). DALI2 preserves this meaning for backward compatibility (decision D4 in CHANGES.md). The DALI2 edge-triggered condition-action feature gets its own operator `?>` to avoid overloading `:<` (decision D5).
+**Why `?>` and not `:<`?** In the original DALI, `:<` is the **action precondition** operator (`actionA :< precondition.`). DALI2 preserves this meaning for backward compatibility. The DALI2 edge-triggered condition-action feature gets its own operator `?>` to avoid overloading `:<` with a different semantics.
 
 ---
 
@@ -532,6 +532,8 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication, 
 | `failure(Action, Motivation)` | `messageA(To, failure(A, M, Me))` | Normal handler |
 | `execute_proc(Action)` | `messageA(To, execute_proc(Action, Me))` | Normal handler |
 | `cancel(Action)` | `messageA(To, cancel(Action, Me))` | Normal handler (DALI2 extension — DALI has receive only) |
+| `cfp(Action, Content)` | `messageA(To, cfp(Action, Content, Me))` | Normal handler (DALI has receive only) |
+| `reply(Content)` | `messageA(To, reply(Content, Me))` | Normal handler (DALI has receive only) |
 
 > **Shorthand:** `send(To, Content)` is also accepted as equivalent to `messageA(To, send_message(Content, Me))`.
 
