@@ -16,6 +16,10 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Action definition | `actionA(X) :- body.` | DALI |
 | Action preconditions | `actionA :< preconditions.` | DALI |
 | Present event | `eventN` (body only — checks `present(event)`) | DALI |
+| Past event | `eventP` (body only — checks `has_past(event)`) | DALI |
+| Remember event | `eventR` (body only — checks `has_remember(event)`) | DALI |
+| Obtain goal | `goalG(X) :- plan.` or `goalG(X) :> plan.` | DALI |
+| Test goal | `goalT(X) :- plan.` or `goalT(X) :> plan.` | DALI |
 | Condition-action (edge-triggered) | `cond ?> action.` | DALI2 |
 | Export past | `head ~/ past1, past2.` | DALI |
 | Export past (not done) | `head </ past1, past2.` | DALI |
@@ -1091,6 +1095,10 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
 | Present event | Atomic (`en/1`) | `eventN` → `present(event)` (body only, available during event processing) |
+| Past event | `evp/1` | `eventP` → `has_past(event)` (body only) |
+| Remember event | `rem/1` | `eventR` → `has_remember(event)` (body only) |
+| Obtain goal | `obg/1` (postfix G) | `goalG` → `obt_goal(goal)` (or `obt_goal/1` directly) |
+| Test goal | `tesg/1` (postfix T) | `goalT` → `test_goal(goal)` (or `test_goal/1` directly) |
 | Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
 | Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |

@@ -9,6 +9,10 @@
 %%   internal_event(Ev, Period, Rep, S, St).  Internal event configuration
 %%   actionA(X) :- body.                      Action definition
 %%   eventN                                   Present event (body only — checks present(event))
+%%   eventP                                   Past event (body only — checks has_past(event))
+%%   eventR                                   Remember event (body only — checks has_remember(event))
+%%   goalG(X) :- plan.                        Obtain goal (DALI postfix G)
+%%   goalT(X) :- plan.                        Test goal (DALI postfix T)
 %%   cond ?> action.                          Condition-action (edge-triggered, DALI2)
 %%   actionA :< precondition.                 Action precondition (DALI)
 %%   head ~/ past1, past2.                    Export past
@@ -207,7 +211,7 @@ extract_suffix(Atom, Base, Suffix) :-
     atom_chars(Atom, Chars),
     Chars \= [],
     last(Chars, LastChar),
-    member(LastChar, ['E', 'I', 'A', 'N', 'P']),
+    member(LastChar, ['E', 'I', 'A', 'N', 'P', 'G', 'T', 'R']),
     append(BaseChars, [LastChar], Chars),
     BaseChars \= [],
     atom_chars(Base, BaseChars),
@@ -283,6 +287,11 @@ transform_body(Term, has_past(BaseTerm)) :-
 transform_body(Term, present(BaseTerm)) :-
     nonvar(Term),
     strip_suffix_term(Term, BaseTerm, 'N'), !.
+%% Remember events (R suffix) — check if event is in remember memory
+%%   myEventR → has_remember(myEvent)
+transform_body(Term, has_remember(BaseTerm)) :-
+    nonvar(Term),
+    strip_suffix_term(Term, BaseTerm, 'R'), !.
 transform_body(Term, Term).
 
 %% fipa_performative(?Name) — list of FIPA-ACL performatives supported in
@@ -365,6 +374,14 @@ process_suffixed_reactive(Name, BaseHead, 'I', Body) :- !,
     %% If an explicit internal_event/5 exists, merge_internal_config replaces
     %% these default options entirely.
     assert(agent_internal(Name, BaseHead, [forever, until(past(BaseHead))], Body)).
+%% Goal postfix (G) — obtain goal: myGoalG :> Plan → obt_goal(myGoal) :- Plan
+process_suffixed_reactive(Name, BaseHead, 'G', Body) :- !,
+    transform_body(Body, TBody),
+    assert(agent_goal(Name, achieve, BaseHead, TBody)).
+%% Test goal postfix (T) — test goal: myGoalT :> Plan → test_goal(myGoal) :- Plan
+process_suffixed_reactive(Name, BaseHead, 'T', Body) :- !,
+    transform_body(Body, TBody),
+    assert(agent_goal(Name, test, BaseHead, TBody)).
 process_suffixed_reactive(Name, BaseHead, _, Body) :-
     assert(agent_handler(Name, BaseHead, Body)).
 
@@ -634,6 +651,28 @@ process_term((Head :- _Body)) :-
     nonvar(Head), \+ (Head = _:_),
     strip_suffix_term(Head, _BaseHead, 'E'), !,
     format(user_error, "DALI2 loader WARNING: External event '~w' cannot be defined with :- (it is atomic). Use :> operator instead: ~w :> body.~n", [Head, Head]).
+
+%% Goal postfix (G) in :- rule: myGoalG :- Plan → obt_goal(myGoal) :- Plan
+process_term((Head :- Body)) :-
+    nonvar(Head), \+ (Head = _:_),
+    strip_suffix_term(Head, BaseHead, 'G'), !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_goal(Ag, achieve, BaseHead, TB)) ; true).
+process_term((Name:Head :- Body)) :-
+    strip_suffix_term(Head, BaseHead, 'G'), !,
+    transform_body(Body, TB),
+    assert(agent_goal(Name, achieve, BaseHead, TB)).
+
+%% Test goal postfix (T) in :- rule: myGoalT :- Plan → test_goal(myGoal) :- Plan
+process_term((Head :- Body)) :-
+    nonvar(Head), \+ (Head = _:_),
+    strip_suffix_term(Head, BaseHead, 'T'), !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_goal(Ag, test, BaseHead, TB)) ; true).
+process_term((Name:Head :- Body)) :-
+    strip_suffix_term(Head, BaseHead, 'T'), !,
+    transform_body(Body, TB),
+    assert(agent_goal(Name, test, BaseHead, TB)).
 
 %% ============================================================
 %% ARBITRARY PROLOG CLAUSE (DALI compatibility)
