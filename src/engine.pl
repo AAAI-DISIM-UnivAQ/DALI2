@@ -54,6 +54,7 @@
 :- dynamic agent_process_pid/2.        % agent_process_pid(Name, Pid) - OS process PID
 :- dynamic agent_log_entry/3.          % agent_log_entry(Name, Timestamp, Message)
 :- dynamic agent_past_event/4.         % agent_past_event(Name, Event, Timestamp, Source)
+:- dynamic present/1.                 % present(Event) — transient, during event processing
 :- dynamic agent_belief_rt/2.          % agent_belief_rt(Name, Fact)
 :- dynamic agent_last_periodic/3.      % agent_last_periodic(Name, PeriodicId, LastTime)
 :- dynamic agent_event_queue/2.        % agent_event_queue(Name, Event)
@@ -317,8 +318,14 @@ handle_fipa_semantics(Name, From, query_ref(Query), _T) :- !,
     findall(Query, agent_belief_rt(Name, Query), Results),
     communication:send(Name, From, inform(query_ref(Query), values(Results))),
     log_agent(Name, "Query_ref response to ~w: ~w", [From, Results]).
+handle_fipa_semantics(Name, From, query_ref(Query, _Name), _T) :- !,
+    findall(Query, agent_belief_rt(Name, Query), Results),
+    communication:send(Name, From, inform(query_ref(Query), values(Results))),
+    log_agent(Name, "Query_ref response to ~w: ~w", [From, Results]).
 
 handle_fipa_semantics(Name, From, propose(Action), _T) :- !,
+    fire_proposal_handlers(Name, From, Action).
+handle_fipa_semantics(Name, From, propose(Action, _Content), _T) :- !,
     fire_proposal_handlers(Name, From, Action).
 
 handle_fipa_semantics(_, _, _, _).  % Other FIPA types: no special semantics
@@ -353,8 +360,11 @@ process_injected_list(_, []).
 process_injected_list(Name, [Event | Rest]) :-
     get_time(Stamp), T is truncate(Stamp * 1000),
     record_past(Name, injected(Event), T),
+    %% Present event: available as subgoal (present/1) during handler execution
+    assert(present(Event)),
     fire_handlers(Name, Event),
     fire_learning(Name, Event),
+    retractall(present(Event)),
     process_injected_list(Name, Rest).
 
 %% fire_handlers(+Name, +Event) - Fire all matching handlers for an event
@@ -929,6 +939,9 @@ execute_body(Name, has_past(Event, Time)) :- !,
     ; agent_past_event(Name, internal(Event), Time, _)
     ).
 
+% present(Event) - Check if event is currently being processed (present/1)
+execute_body(_, present(Event)) :- !, present(Event).
+
 % do(Action) - Execute an action defined with agent:do
 execute_body(Name, do(Action)) :- !,
     (loader:agent_action(Name, ActionPattern, ActionBody),
@@ -1005,10 +1018,16 @@ execute_body(Name, has_confirmed(Fact)) :- !,
     agent_past_event(Name, confirmed(Fact), _, _).
 
 % accept_proposal(To, Action) - Send accept_proposal FIPA message
+% accept_proposal(To, Action, Reason) - DALI original arity with reason
+execute_body(Name, accept_proposal(To, Action, Reason)) :- !,
+    execute_body(Name, send(To, accept_proposal(Action, Reason))).
 execute_body(Name, accept_proposal(To, Action)) :- !,
     execute_body(Name, send(To, accept_proposal(Action))).
 
 % reject_proposal(To, Action) - Send reject_proposal FIPA message
+% reject_proposal(To, Action, Reason) - DALI original arity with reason
+execute_body(Name, reject_proposal(To, Action, Reason)) :- !,
+    execute_body(Name, send(To, reject_proposal(Action, Reason))).
 execute_body(Name, reject_proposal(To, Action)) :- !,
     execute_body(Name, send(To, reject_proposal(Action))).
 
@@ -1150,6 +1169,22 @@ execute_body(Name, messageA(Dest, send_message(Content))) :- !,
     execute_body(Name, send(Dest, Content)).
 execute_body(Name, messageA(Dest, send_message(Content, _Me), _ReplyTo)) :- !,
     execute_body(Name, send(Dest, Content)).
+% DALI original FIPA primitives (form B) — runtime fallback
+% messageA(To, inform(Content, Me)) → send(To, inform(Content))
+execute_body(Name, messageA(Dest, Perf)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    loader:fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep],
+    execute_body(Name, send(Dest, Stripped)).
+execute_body(Name, messageA(Dest, Perf, _ReplyTo)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    loader:fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep],
+    execute_body(Name, send(Dest, Stripped)).
 
 % evp(Event) → has_past(Event)
 execute_body(Name, evp(Event)) :- !,
@@ -1180,6 +1215,7 @@ call_condition(Name, has_past(Event)) :- !,
     (agent_past_event(Name, Event, _, _) -> true
     ; event_in_past(Name, Event)
     ).
+call_condition(_, present(Event)) :- !, present(Event).
 call_condition(Name, past(Event)) :- !,
     (agent_past_event(Name, Event, _, _) -> true
     ; event_in_past(Name, Event)

@@ -2,7 +2,7 @@
 
 This guide explains all included examples, how to run them, and the commands to test each feature.
 
-DALI2 supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework, plus the `?>` operator for DALI2's edge-triggered condition-action rules. Agents communicate using the FIPA-style primitive `messageA(Dest, send_message(Content, Me))`. Each agent runs as a **separate OS process**.
+DALI2 supports **DALI-compatible syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI framework, plus the `?>` operator for DALI2's edge-triggered condition-action rules. Agents communicate using FIPA-style messages: `messageA(Dest, performative(Content, Me))` for FIPA performatives (inform, confirm, propose, etc.) and `messageA(Dest, send_message(Content, Me))` for plain messages. See [RULES.md → FIPA Message Types](RULES.md#fipa-message-types) for the full table. Each agent runs as a **separate OS process**.
 
 ## Table of Contents
 
@@ -112,7 +112,7 @@ curl -X POST http://localhost:8080/api/send \
 
 **File:** `examples/agriculture.pl` — Ported from the original DALI case study (`dalia/case_study_smart_agriculture`).
 
-A precision agriculture system with 6 agents. Sensors validate readings inline (only abnormal readings are forwarded), the crop advisor decides actions (irrigate, reduce water, advisory), and the farmer receives notifications. All communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
+A precision agriculture system with 6 agents. Sensors validate readings inline (only abnormal readings are forwarded), the crop advisor decides actions (irrigate, reduce water, advisory), and the farmer receives notifications. All communication uses `messageA(Dest, send_message(Content, Me))` for plain messages and `messageA(Dest, performative(Content, Me))` for FIPA performatives.
 
 ### Agents
 
@@ -212,7 +212,7 @@ curl.exe http://localhost:8080/api/beliefs?agent=farmer_agent
 
 **File:** `examples/emergency.pl` — Ported from the original DALI emergency example (`dalia/example`).
 
-A 9-agent emergency response system. The sensor validates alarms inline (real vs false alarm). The coordinator uses **internal events** (default fire-once behavior) for multi-step coordination: it waits for equipment from the manager before dispatching the responder, and waits for evacuation + response completion before declaring the emergency resolved. All communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
+A 9-agent emergency response system. The sensor validates alarms inline (real vs false alarm). The coordinator uses **internal events** (default fire-once behavior) for multi-step coordination: it waits for equipment from the manager before dispatching the responder, and waits for evacuation + response completion before declaring the emergency resolved. All communication uses `messageA(Dest, send_message(Content, Me))` for plain messages and `messageA(Dest, performative(Content, Me))` for FIPA performatives.
 
 ### Agents
 
@@ -301,7 +301,7 @@ curl.exe http://localhost:8080/api/past?agent=coordinator
 
 **File:** `examples/showcase_original_features.pl`
 
-A comprehensive showcase using **only standard DALI syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`, `:~`), suffixes (`E`, `I`, `A`, `N`, `P`), and FIPA-style communication (`messageA(Dest, send_message(Content, Me))`) that work in the original DALI framework. Internal events use the default fire-once behavior (no `internal_event/5` declarations). No DALI2-only extensions (`?>`, `every`, `when`, `helper`, `learn_from`, `ontology`, `on_proposal`, `bb_write`/`bb_read`/`bb_remove`). This is the recommended starting point for students learning DALI semantics.
+A comprehensive showcase using **only standard DALI syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`, `:~`), suffixes (`E`, `I`, `A`, `N`, `P`), and FIPA-style communication that work in the original DALI framework. FIPA performatives use the direct form `messageA(Dest, performative(Content..., Me))` with DALI-original arity (e.g. `messageA(worker, propose(analyze(Data), [], Me))`, `messageA(worker, query_ref(status(_), _, Me))`). Internal events use the default fire-once behavior (no `internal_event/5` declarations). No DALI2-only extensions (`?>`, `every`, `when`, `helper`, `learn_from`, `ontology`, `on_proposal`, `bb_write`/`bb_read`/`bb_remove`). This is the recommended starting point for students learning DALI semantics.
 
 ### Agents
 
@@ -344,7 +344,7 @@ See [Section 4 (New Features Showcase)](#4-new-features-showcase) for the full s
 
 **File:** `examples_new_features/showcase_new_features.pl`
 
-The comprehensive reference example covering **all 32 DALI2 features**, including DALI2-only extensions: `internal_event/5` declarations (interval, change, trigger, between), `every`, `when`, `helper`, `on_proposal`, `learn_from`, `ontology`/`ontology_file`, `bb_read`/`bb_write`/`bb_remove`, and `ask_ai`. Communication uses `messageA(Dest, send_message(Content, Me))` (FIPA-style).
+The comprehensive reference example covering **all 32 DALI2 features**, including DALI2-only extensions: `internal_event/5` declarations (interval, change, trigger, between), `every`, `when`, `helper`, `on_proposal`, `learn_from`, `ontology`/`ontology_file`, `bb_read`/`bb_write`/`bb_remove`, and `ask_ai`. Communication uses `messageA(Dest, send_message(Content, Me))` for plain messages and `messageA(Dest, performative(Content, Me))` for FIPA performatives.
 
 ### Agents
 

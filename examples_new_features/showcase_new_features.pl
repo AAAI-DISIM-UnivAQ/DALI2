@@ -211,9 +211,9 @@ told(_, emergency(_, _), 200) :- true.         %% highest priority
 told(_, alert(_, _), 100) :- true.
 told(_, confirm(_), 90) :- true.
 told(_, inform(_, _), 80) :- true.
-told(_, accept_proposal(_), 70) :- true.
-told(_, reject_proposal(_), 70) :- true.
-told(_, query_ref(_), 60) :- true.
+told(_, accept_proposal(_,_), 70) :- true.
+told(_, reject_proposal(_,_), 70) :- true.
+told(_, query_ref(_,_), 60) :- true.
 told(_, notify(_, _), 50) :- true.
 told(_, sensor_data(_), 30) :- believes(status(active)).  %% accept only when active
 told(_, calibration_request, 10) :- true.       %% lowest priority
@@ -229,9 +229,9 @@ told(_, heartbeat).                              %% 2-arg form (priority=0, body
 tell(_, _, calibration_done) :- true.
 tell(_, _, response(_)) :- true.
 tell(_, _, log_event(_, _, _)) :- true.
-tell(_, _, propose(_)) :- believes(status(active)).  %% send proposals only when active
+tell(_, _, propose(_,_)) :- believes(status(active)).  %% send proposals only when active
 tell(_, _, confirm(_)) :- true.
-tell(_, _, query_ref(_)) :- true.
+tell(_, _, query_ref(_,_)) :- true.
 tell(_, _, analyze(_)) :- true.
 
 %% Multi-event with delta-t: fire when both sensor data AND an alert
@@ -273,27 +273,27 @@ confirmE(Fact) :>
 informE(Content, Meta) :>
     log("FIPA INFORM received: ~w meta=~w", [Content, Meta]).
 
-accept_proposalE(Action) :>
-    log("FIPA PROPOSAL ACCEPTED: ~w", [Action]).
+accept_proposalE(Action, Reason) :>
+    log("FIPA PROPOSAL ACCEPTED: ~w (reason: ~w)", [Action, Reason]).
 
-reject_proposalE(Action) :>
-    log("FIPA PROPOSAL REJECTED: ~w", [Action]).
+reject_proposalE(Action, Reason) :>
+    log("FIPA PROPOSAL REJECTED: ~w (reason: ~w)", [Action, Reason]).
 
 request_analysisE(Data) :>
     log("Requesting analysis, proposing to worker..."),
-    messageA(worker, send_message(propose(analyze(Data)), Me)).
+    messageA(worker, propose(analyze(Data), [], Me)).
 
 test_rejectE :>
     log("Testing proposal rejection..."),
-    messageA(worker, send_message(propose(impossible_task), Me)).
+    messageA(worker, propose(impossible_task, [], Me)).
 
 send_confirmE(Fact) :>
     log("Sending FIPA confirm(~w) to worker", [Fact]),
-    messageA(worker, send_message(confirm(Fact), Me)).
+    messageA(worker, confirm(Fact, Me)).
 
 query_workerE(Q) :>
     log("Sending FIPA query_ref(~w) to worker", [Q]),
-    messageA(worker, send_message(query_ref(Q), Me)).
+    messageA(worker, query_ref(Q, _, Me)).
 
 %% Export past rules (DALI ~/ syntax)
 %% When both alert and sensor_data in past, consume and react
@@ -375,9 +375,9 @@ believes(skill(data_analysis)).
 believes(status(ready)).
 
 %% Told rules with body conditions
-told(_, propose(_), 100) :- believes(available(true)).  %% accept proposals only when available
+told(_, propose(_,_), 100) :- believes(available(true)).  %% accept proposals only when available
 told(_, confirm(_), 90) :- true.
-told(_, query_ref(_), 80) :- true.
+told(_, query_ref(_,_), 80) :- true.
 told(_, inform(_, _), 70) :- true.
 
 %% Action proposal handlers [NEW]
@@ -385,13 +385,13 @@ on_proposal(analyze(Data)) :-
     believes(skill(data_analysis)),
     from(Sender),
     log("PROPOSAL: Accepting analyze(~w) from ~w", [Data, Sender]),
-    accept_proposal(Sender, analyze(Data)),
+    accept_proposal(Sender, analyze(Data), []),
     do(analyze(Data)).
 
 on_proposal(impossible_task) :-
     from(Sender),
     log("PROPOSAL: Rejecting impossible_task from ~w", [Sender]),
-    reject_proposal(Sender, impossible_task).
+    reject_proposal(Sender, impossible_task, []).
 
 %% Action definition (DALI A suffix style) with precondition (DALI :< syntax)
 %% The precondition must hold before the action body executes.
@@ -401,12 +401,12 @@ analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
-    messageA(coordinator, send_message(inform(analysis_result(Data), complete), Me)).
+    messageA(coordinator, inform(analysis_result(Data), complete, Me)).
 
 %% External event handler
 confirmE(Fact) :>
     log("FIPA CONFIRM received: ~w", [Fact]).
 
 %% Export past rule (DALI ~/ syntax)
-messageA(coordinator, send_message(inform(task_report(Task), complete), Me)) ~/
+messageA(coordinator, inform(task_report(Task), complete, Me)) ~/
     task_done(Task), report_needed(Task).

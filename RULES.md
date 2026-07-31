@@ -15,7 +15,7 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Internal config | `internal_event(ev, 3, forever, true, until_cond(past(ev))).` | DALI2 |
 | Action definition | `actionA(X) :- body.` | DALI |
 | Action preconditions | `actionA :< preconditions.` | DALI |
-| Present event | `condN` (atomic, body only) | DALI |
+| Present event | `eventN` (body only — checks `present(event)`) | DALI |
 | Condition-action (edge-triggered) | `cond ?> action.` | DALI2 |
 | Export past | `head ~/ past1, past2.` | DALI |
 | Export past (not done) | `head </ past1, past2.` | DALI |
@@ -29,7 +29,7 @@ DALI2 uses **identical syntax** to the original DALI — no prefix needed. Each 
 | Told rule | `told(_, pattern, priority) :- body.` | DALI |
 | Told rule (no priority) | `told(_, pattern) :- body.` | DALI |
 | Tell rule | `tell(_, _, pattern) :- body.` | DALI |
-| Message sending | `messageA(dest, send_message(content, Me))` |
+| Message sending | `messageA(dest, send_message(content, Me))` or `messageA(dest, performative(content, Me))` (FIPA) |
 | Past check | `evp(event)` or `eventP(args)` |
 | Residue goal | `tenta_residuo(goal)` |
 | Belief | `believes(fact).` or bare fact |
@@ -131,7 +131,7 @@ alarmE(Type, Location) :>
 
 When a message arrives, the engine matches it against all handlers for the receiving agent. If the agent has ontology declarations, matching is ontology-aware (e.g., `alarmE(hot(X))` will also match `alarm(warm(X))` if `same_as(hot, warm)` is declared).
 
-**Body predicates:** Inside `:>` bodies, you can use both DALI-style predicates (`messageA`, `eventP`, `actionA`, `evp`, `tenta_residuo`) and DALI2-style predicates (`send`, `has_past`, `do`, `achieve`). They are equivalent. For FIPA compatibility, prefer `messageA(Dest, send_message(Content, Me))` over `send(Dest, Content)`.
+**Body predicates:** Inside `:>` bodies, you can use both DALI-style predicates (`messageA`, `eventP`, `actionA`, `evp`, `tenta_residuo`) and DALI2-style predicates (`send`, `has_past`, `do`, `achieve`). They are equivalent. For FIPA messages, use `messageA(Dest, performative(Content, Me))` (sender is last arg inside the performative). See [FIPA Message Types](#fipa-message-types) for details.
 
 ---
 
@@ -302,30 +302,38 @@ believes(battery_level(L)), L < 20 ?> (
 
 ---
 
-## Present/Environment Events
+## Present Events
 
-Present events (suffix `N`) represent **atomic environmental observations**. They cannot be "defined" with `:-` — they are set by the environment and checked as conditions in other rules.
+Present events (suffix `N`, for "Now") represent events that have been perceived but not yet reacted to. They are available as subgoals in the body of rules while the corresponding event is being processed.
 
-This matches the original DALI semantics where present events (`en/1`) are flags that the environment sets, and the agent uses them as triggers/conditions in reactive rules.
+This matches the original DALI semantics (paper, Section 3): "each event atom in EV is also available to the agent as a present event (indicated with postfix N) and can occur as a subgoal in the body of rules."
 
-**Usage:** Present events appear only in the **body** of `:>`, `:<`, or `when` rules:
+**Semantics:** When an event arrives, DALI2 asserts `present(Event)` before firing handlers, and retracts it after. While the event is being processed, any rule body can check `eventN` (transformed to `present(event)`) to reason about the present event.
+
+**Usage:** Present events appear in the **body** of rules:
 
 ```prolog
-:- agent(robot, [cycle(1)]).
+:- agent(doorkeeper, [cycle(1)]).
 
-%% React to an environmental observation via reactive rule
-obstacle_detectedE(Distance) :>
-    Distance < 5,
-    log("Obstacle detected at ~w meters, turning around", [Distance]),
-    do(turn_around).
+%% Reason about a present event (before/during reaction)
+visitor_arrived :- bellringsN.
 
-%% Or use when() to monitor an environmental condition each cycle
-when(believes(obstacle_ahead(true))) :-
-    do(turn_around),
-    log("Obstacle ahead — turning").
+%% React to the external event
+bellringsE :>
+    visitor_arrived,        %% checks present(bellrings) — succeeds while event is being processed
+    log("Opening door for visitor"),
+    do(open_door).
+
+%% Action
+open_doorA :- log("Door opened!").
 ```
 
-**Important:** Writing `condN :- body.` (N suffix in the head of `:-`) is **not allowed** and will produce a loader warning. Present events are atomic — they don't have definitions.
+In the example above, when `bellrings` is injected:
+1. `present(bellrings)` is asserted
+2. Handler `bellringsE` fires → calls `visitor_arrived` → `bellringsN` (→ `present(bellrings)`) succeeds
+3. After handler completes, `present(bellrings)` is retracted
+
+**Important:** Writing `condN :- body.` (N suffix in the head of `:-`) is **not allowed** and will produce a loader warning. Present events are atomic observations — they don't have definitions.
 
 ---
 
@@ -500,33 +508,39 @@ tell(_, _, analyze(_)) :- true.
 
 ## FIPA Message Types
 
-DALI2 supports FIPA-ACL message types for structured inter-agent communication. FIPA types are sent as regular messages but have special semantics on the receiving side.
+DALI2 supports FIPA-ACL message types for structured inter-agent communication, with the same syntax and arity as the original DALI framework. FIPA types are sent as regular messages but have special semantics on the receiving side.
 
-**Supported FIPA types:**
+**Syntax:** `messageA(To, performative(Content..., Me))` — the sender `Me` is the last argument inside the performative, as in the original DALI framework. For plain messages (no FIPA semantics), use `messageA(To, send_message(Content, Me))`.
+
+> **Backward compatibility:** The wrapper form `messageA(To, send_message(performative(Content...), Me))` is also accepted and produces the same wire format, but the direct form above is preferred.
+
+**Supported FIPA types (DALI-original arity):**
 
 | Type | Syntax | Receiver Semantics |
 |------|--------|--------------------|
-| `inform(Content)` | `messageA(To, send_message(inform(Content), Me))` | Normal handler + past record |
-| `inform(Content, Meta)` | `messageA(To, send_message(inform(Content, Meta), Me))` | Normal handler + past record |
-| `confirm(Fact)` | `messageA(To, send_message(confirm(Fact), Me))` | Records `confirmed(Fact)` as past event |
-| `disconfirm(Fact)` | `messageA(To, send_message(disconfirm(Fact), Me))` | Removes `confirmed(Fact)` from past |
-| `propose(Action)` | `messageA(To, send_message(propose(Action), Me))` | Fires `on_proposal` handler |
-| `accept_proposal(Action)` | `messageA(To, send_message(accept_proposal(A), Me))` | Normal handler |
-| `reject_proposal(Action)` | `messageA(To, send_message(reject_proposal(A), Me))` | Normal handler |
-| `query_ref(Query)` | `messageA(To, send_message(query_ref(Query), Me))` | Auto-responds with matching beliefs |
-| `agree(Content)` | `messageA(To, send_message(agree(Content), Me))` | Normal handler |
-| `refuse(Content)` | `messageA(To, send_message(refuse(Content), Me))` | Normal handler |
-| `failure(Action, Reason)` | `messageA(To, send_message(failure(A, R), Me))` | Normal handler |
-| `cancel(Action)` | `messageA(To, send_message(cancel(Action), Me))` | Normal handler |
+| `send_message(Content)` | `messageA(To, send_message(Content, Me))` | Normal handler + past record |
+| `inform(Content)` | `messageA(To, inform(Content, Me))` | Normal handler + past record |
+| `inform(Content, Meta)` | `messageA(To, inform(Content, Meta, Me))` | Normal handler + past record |
+| `confirm(Fact)` | `messageA(To, confirm(Fact, Me))` | Records `confirmed(Fact)` as past event |
+| `disconfirm(Fact)` | `messageA(To, disconfirm(Fact, Me))` | Removes `confirmed(Fact)` from past |
+| `query_ref(Query, Name)` | `messageA(To, query_ref(Query, Name, Me))` | Auto-responds with matching beliefs |
+| `propose(Action, Content)` | `messageA(To, propose(Action, Content, Me))` | Fires `on_proposal(Action)` handler |
+| `accept_proposal(Action, Reason)` | `messageA(To, accept_proposal(A, R, Me))` | Normal handler (response to a proposal) |
+| `reject_proposal(Action, Reason)` | `messageA(To, reject_proposal(A, R, Me))` | Normal handler (response to a proposal) |
+| `agree(Content)` | `messageA(To, agree(Content, Me))` | Normal handler |
+| `refuse(Content)` | `messageA(To, refuse(Content, Me))` | Normal handler |
+| `failure(Action, Motivation)` | `messageA(To, failure(A, M, Me))` | Normal handler |
+| `execute_proc(Action)` | `messageA(To, execute_proc(Action, Me))` | Normal handler |
+| `cancel(Action)` | `messageA(To, cancel(Action, Me))` | Normal handler (DALI2 extension — DALI has receive only) |
 
-> **Shorthand:** `send(To, Content)` is accepted as equivalent to `messageA(To, send_message(Content, Me))`. For FIPA compatibility, prefer the `messageA` form.
+> **Shorthand:** `send(To, Content)` is also accepted as equivalent to `messageA(To, send_message(Content, Me))`.
 
 **Special semantics:**
 
 - **`confirm(Fact)`**: The receiver records `confirmed(Fact)` as a past event. Check with `has_confirmed(Fact)`.
 - **`disconfirm(Fact)`**: The receiver removes `confirmed(Fact)` from past events.
-- **`query_ref(Query)`**: The receiver automatically responds with `inform(query_ref(Query), values(Results))` containing all matching beliefs.
-- **`propose(Action)`**: Fires any `on_proposal(Action)` handlers (see [Action Proposals](#action-proposals)).
+- **`query_ref(Query, Name)`**: The receiver automatically responds with `inform(query_ref(Query), values(Results))` containing all matching beliefs.
+- **`propose(Action, Content)`**: Fires any `on_proposal(Action)` handlers (Content is available but ignored by the handler pattern — see [Action Proposals](#action-proposals)).
 
 **Examples:**
 
@@ -535,13 +549,13 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication. 
 
 %% Confirm a fact to another agent
 measurement_completeE(Data) :>
-    messageA(coordinator, send_message(confirm(measurement(Data)), Me)).
+    messageA(coordinator, confirm(measurement(Data), Me)).
 
 :- agent(coordinator, [cycle(2)]).
 
 %% Query another agent's beliefs
 need_statusE :>
-    messageA(sensor, send_message(query_ref(status(_)), Me)).
+    messageA(sensor, query_ref(status(_), _, Me)).
 
 %% Handle the query response
 informE(query_ref(Q), values(V)) :>
@@ -560,7 +574,7 @@ The proposal mechanism enables negotiation between agents using FIPA propose/acc
 on_proposal(ActionPattern) :- Body.
 ```
 
-When an agent receives a `propose(Action)` message, all matching `on_proposal` handlers fire. Inside the handler, `from(Sender)` retrieves the proposer, and `accept_proposal(To, Action)` or `reject_proposal(To, Action)` send the response.
+When an agent receives a `propose(Action, Content)` message, all matching `on_proposal(Action)` handlers fire (Content is ignored by the handler). Inside the handler, `from(Sender)` retrieves the proposer, and `accept_proposal(To, Action, Reason)` or `reject_proposal(To, Action, Reason)` send the response.
 
 **Examples:**
 
@@ -583,12 +597,12 @@ on_proposal(impossible_task) :-
 
 %% Coordinator sends a proposal
 request_analysisE(Data) :>
-    messageA(worker, send_message(propose(analyze(Data)), Me)).
+    messageA(worker, propose(analyze(Data), [], Me)).
 
 %% Coordinator handles response
-accept_proposalE(Action) :>
+accept_proposalE(Action, Reason) :>
     log("Worker accepted: ~w", [Action]).
-reject_proposalE(Action) :>
+reject_proposalE(Action, Reason) :>
     log("Worker rejected: ~w", [Action]).
 ```
 
@@ -863,7 +877,7 @@ analyzeA(Data) :< believes(data_ready(Data)).
 analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
-    messageA(coordinator, send_message(inform(analysis_result(Data), complete), Me)).
+    messageA(coordinator, inform(analysis_result(Data), complete, Me)).
 
 %% Action without precondition — always runs
 log_heartbeatA :-
@@ -937,13 +951,16 @@ These predicates are available inside rule bodies:
 
 | Predicate | Description |
 |-----------|-------------|
-| `messageA(Agent, send_message(Content, Me))` | Send a message to another agent (FIPA-style, filtered by tell/told) |
-| `send(Agent, Content)` | Shorthand for `messageA(Agent, send_message(Content, Me))` |
+| `messageA(Agent, send_message(Content, Me))` | Send a plain message (filtered by tell/told) |
+| `messageA(Agent, performative(Content, Me))` | Send a FIPA message (sender is last arg inside performative) |
+| `send(Agent, Content)` | Shorthand — equivalent to `messageA(Agent, send_message(Content, Me))` |
 | `broadcast(Content)` | Send to all other agents |
 | `from(Sender)` | Get sender of current message (use in handlers/proposals) |
 | `reply_to(Content)` | Reply to current message sender |
-| `accept_proposal(To, Action)` | Send accept\_proposal FIPA message |
-| `reject_proposal(To, Action)` | Send reject\_proposal FIPA message |
+| `accept_proposal(To, Action, Reason)` | Send accept\_proposal FIPA message (DALI arity) |
+| `accept_proposal(To, Action)` | Send accept\_proposal (shorthand, no reason) |
+| `reject_proposal(To, Action, Reason)` | Send reject\_proposal FIPA message (DALI arity) |
+| `reject_proposal(To, Action)` | Send reject\_proposal (shorthand, no reason) |
 
 ### Logging
 
@@ -1071,7 +1088,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Internal event | `eventI :> body.` (config auto-generated) | `eventI :> body.` + optional `internal_event/5` (DALI2 extension) |
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
-| Present event | Atomic (`en/1`) | Atomic (use in body of `:>`, `?>`, `when`) |
+| Present event | Atomic (`en/1`) | `eventN` → `present(event)` (body only, available during event processing) |
 | Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
 | Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |
@@ -1086,7 +1103,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Told | `told(_, pattern, pri) :- body.` | `told(_, pattern, pri) :- body.` (identical) |
 | Told (no priority) | `told(_, pattern) :- body.` | `told(_, pattern) :- body.` (identical) |
 | Tell | `tell(_, _, pattern) :- body.` | `tell(_, _, pattern) :- body.` (identical) |
-| Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `send(dest, content)` as shorthand) |
+| Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `messageA(dest, performative(content, Me))` for FIPA types and `send(dest, content)` as shorthand) |
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |
 | Belief check | `clause(isa(fact,_,_),_)` | Same, or `believes(fact)` |

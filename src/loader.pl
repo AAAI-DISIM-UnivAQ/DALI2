@@ -8,7 +8,7 @@
 %%   eventI(X) :> body.                       Internal event
 %%   internal_event(Ev, Period, Rep, S, St).  Internal event configuration
 %%   actionA(X) :- body.                      Action definition
-%%   condN                                    Present event (atomic, body only)
+%%   eventN                                   Present event (body only — checks present(event))
 %%   cond ?> action.                          Condition-action (edge-triggered, DALI2)
 %%   actionA :< precondition.                 Action precondition (DALI)
 %%   head ~/ past1, past2.                    Export past
@@ -65,7 +65,8 @@
     agent_on_proposal/3,
     agent_internal_config/6,
     clear_definitions/0,
-    transform_body/2
+    transform_body/2,
+    fipa_performative/1
 ]).
 
 :- use_module(library(lists)).
@@ -245,6 +246,26 @@ transform_body(not(A), not(TA)) :- !,
     transform_body(A, TA).
 transform_body(messageA(Dest, send_message(Content, _Me)), send(Dest, Content)) :- !.
 transform_body(messageA(Dest, send_message(Content)), send(Dest, Content)) :- !.
+%% DALI original FIPA primitives (form B) — sender (Me) is the last arg
+%% inside the performative. Stripped during transformation.
+%%   messageA(To, inform(Content, Me))             → send(To, inform(Content))
+%%   messageA(To, inform(Content, Meta, Me))       → send(To, inform(Content, Meta))
+%%   messageA(To, confirm(Fact, Me))               → send(To, confirm(Fact))
+%%   messageA(To, propose(Action, Me))             → send(To, propose(Action))
+%%   etc. for all FIPA performatives listed in fipa_performative/1
+transform_body(messageA(Dest, Perf), send(Dest, Stripped)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep].
+%% 3-arg messageA with FIPA primitive (with ReplyTo)
+transform_body(messageA(Dest, Perf, _ReplyTo), send(Dest, Stripped)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep].
 transform_body(evp(Event), has_past(Event)) :- !.
 transform_body(clause(past(Event,_,_),_), has_past(Event)) :- !.
 transform_body(clause(isa(Fact,_,_),_), believes(Fact)) :- !.
@@ -256,7 +277,30 @@ transform_body(Term, do(BaseTerm)) :-
 transform_body(Term, has_past(BaseTerm)) :-
     nonvar(Term),
     strip_suffix_term(Term, BaseTerm, 'P'), !.
+%% Present events (N suffix) — available as subgoal while event is being processed
+%%   bellringsN → present(bellrings)
+%%   visitor_arrived :- bellringsN → visitor_arrived :- present(bellrings)
+transform_body(Term, present(BaseTerm)) :-
+    nonvar(Term),
+    strip_suffix_term(Term, BaseTerm, 'N'), !.
 transform_body(Term, Term).
+
+%% fipa_performative(?Name) — list of FIPA-ACL performatives supported in
+%% the "original DALI" form B syntax: messageA(To, perform(Content..., Me))
+%% where Me (sender) is the last argument inside the performative.
+%% send_message is NOT listed here — it has its own dedicated transform clauses.
+fipa_performative(inform).
+fipa_performative(confirm).
+fipa_performative(disconfirm).
+fipa_performative(query_ref).
+fipa_performative(propose).
+fipa_performative(accept_proposal).
+fipa_performative(reject_proposal).
+fipa_performative(agree).
+fipa_performative(refuse).
+fipa_performative(failure).
+fipa_performative(cancel).
+fipa_performative(execute_proc).
 
 parse_past_list((A, B), [A | Rest]) :- !,
     parse_past_list(B, Rest).

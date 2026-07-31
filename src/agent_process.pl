@@ -28,6 +28,7 @@ user:message_hook(_, informational, _) :- !.
 :- dynamic agent_running/0.
 :- dynamic agent_event_queue/1.          % agent_event_queue(Event)
 :- dynamic agent_past_event/3.           % agent_past_event(Event, Timestamp, Source)
+:- dynamic present/1.                   % present(Event) — transient, during event processing
 :- dynamic agent_belief_rt/1.            % agent_belief_rt(Fact)
 :- dynamic agent_log_entry/2.            % agent_log_entry(Timestamp, Message)
 :- dynamic agent_internal_count/2.       % agent_internal_count(InternalId, Count)
@@ -137,8 +138,11 @@ process_injected_from_redis(_, []).
 process_injected_from_redis(Name, [message(_From, Content, T)|Rest]) :-
     log_local(Name, "Event injected: ~w", [Content]),
     record_past_local(injected(Content), T),
+    %% Present event: available as subgoal (present/1) during handler execution
+    assert(present(Content)),
     fire_handlers_local(Name, Content),
     fire_learning_local(Name, Content),
+    retractall(present(Content)),
     process_injected_from_redis(Name, Rest).
 
 prioritize_messages_local(Name, Messages, Sorted) :-
@@ -164,9 +168,12 @@ process_message_list_local(Name, [message(From, Content, T) | Rest]) :-
         record_past_local(received(Content, From), T),
         retractall(agent_current_sender(_)),
         assert(agent_current_sender(From)),
+        %% Present event: available as subgoal (present/1) during handler execution
+        assert(present(Content)),
         handle_fipa_semantics_local(Name, From, Content, T),
         fire_handlers_local(Name, Content),
         fire_learning_local(Name, Content),
+        retractall(present(Content)),
         retractall(agent_current_sender(_))
     ;
         log_local(Name, "Message rejected by told rule: ~w from ~w", [Content, From])
@@ -203,7 +210,13 @@ handle_fipa_semantics_local(Name, From, query_ref(Query), _T) :- !,
     findall(Query, agent_belief_rt(Query), Results),
     redis_comm:redis_publish_linda(Name, From, inform(query_ref(Query), values(Results))),
     log_local(Name, "Query_ref response to ~w: ~w", [From, Results]).
+handle_fipa_semantics_local(Name, From, query_ref(Query, _Name), _T) :- !,
+    findall(Query, agent_belief_rt(Query), Results),
+    redis_comm:redis_publish_linda(Name, From, inform(query_ref(Query), values(Results))),
+    log_local(Name, "Query_ref response to ~w: ~w", [From, Results]).
 handle_fipa_semantics_local(Name, From, propose(Action), _T) :- !,
+    fire_proposal_handlers_local(Name, From, Action).
+handle_fipa_semantics_local(Name, From, propose(Action, _Content), _T) :- !,
     fire_proposal_handlers_local(Name, From, Action).
 handle_fipa_semantics_local(_, _, _, _).
 
@@ -253,8 +266,11 @@ process_injected_list_local(_, []).
 process_injected_list_local(Name, [Event | Rest]) :-
     get_time(Stamp), T is truncate(Stamp * 1000),
     record_past_local(injected(Event), T),
+    %% Present event: available as subgoal (present/1) during handler execution
+    assert(present(Event)),
     fire_handlers_local(Name, Event),
     fire_learning_local(Name, Event),
+    retractall(present(Event)),
     process_injected_list_local(Name, Rest).
 
 %% ============================================================
@@ -719,6 +735,9 @@ execute_body_local(_, has_past(Event, Time)) :- !,
     ; agent_past_event(injected(Event), Time, _) -> true
     ; agent_past_event(internal(Event), Time, _)).
 
+%% Present — check if event is currently being processed (present/1)
+execute_body_local(_, present(Event)) :- !, present(Event).
+
 %% Actions
 %% DALI semantics: an action fires only if its precondition (actionA :< Pre) holds
 %% (or there is no precondition). Actions with a defining clause run its body;
@@ -782,8 +801,13 @@ execute_body_local(_, has_remember(Event, Time)) :- !, agent_remember_ev(Event, 
 execute_body_local(_, has_confirmed(Fact)) :- !, agent_past_event(confirmed(Fact), _, _).
 
 %% Proposals
+%% accept_proposal(To, Action) / accept_proposal(To, Action, Reason) — DALI original arity
+execute_body_local(Name, accept_proposal(To, Action, Reason)) :- !,
+    execute_body_local(Name, send(To, accept_proposal(Action, Reason))).
 execute_body_local(Name, accept_proposal(To, Action)) :- !,
     execute_body_local(Name, send(To, accept_proposal(Action))).
+execute_body_local(Name, reject_proposal(To, Action, Reason)) :- !,
+    execute_body_local(Name, send(To, reject_proposal(Action, Reason))).
 execute_body_local(Name, reject_proposal(To, Action)) :- !,
     execute_body_local(Name, send(To, reject_proposal(Action))).
 
@@ -868,6 +892,22 @@ execute_body_local(Name, messageA(Dest, send_message(Content))) :- !,
     execute_body_local(Name, send(Dest, Content)).
 execute_body_local(Name, messageA(Dest, send_message(Content, _Me), _ReplyTo)) :- !,
     execute_body_local(Name, send(Dest, Content)).
+%% DALI original FIPA primitives (form B) — runtime fallback
+%% messageA(To, inform(Content, Me)) → send(To, inform(Content))
+execute_body_local(Name, messageA(Dest, Perf)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    loader:fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep],
+    execute_body_local(Name, send(Dest, Stripped)).
+execute_body_local(Name, messageA(Dest, Perf, _ReplyTo)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    loader:fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep],
+    execute_body_local(Name, send(Dest, Stripped)).
 execute_body_local(_, evp(Event)) :- !,
     (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
 execute_body_local(Name, tenta_residuo(Goal)) :- !,
@@ -933,6 +973,7 @@ call_condition_local(believes(Fact)) :- !,
     ; agent_belief_rt(Other), agent_name(Name), ontology_match_local(Name, Fact, Other)).
 call_condition_local(has_past(Event)) :- !,
     (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
+call_condition_local(present(Event)) :- !, present(Event).
 call_condition_local(past(Event)) :- !,
     (agent_past_event(Event, _, _) -> true ; event_in_past_local(Event)).
 call_condition_local(learned(Pattern, Outcome)) :- !, agent_learned_rt(Pattern, Outcome).

@@ -375,10 +375,10 @@ The web interface at `http://localhost:8080` provides:
 | AI integration | External Python TCP service | Built-in (OpenRouter API) |
 | Docker setup | Complex (SICStus install) | Simple (swipl base image) |
 | Event syntax | `eventE(X) :> body.` | `eventE(X) :> body.` (identical!) |
-| Message sending | `messageA(dest, send_message(ev(X), Me))` | Same (DALI2 also accepts `send(dest, ev(X))` as shorthand) |
+| Message sending | `messageA(dest, send_message(ev(X), Me))` | Same (DALI2 also accepts `messageA(dest, performative(ev(X), Me))` for FIPA types and `send(dest, ev(X))` as shorthand) |
 | Internal events | `eventI :> body.` (config auto-generated) | `eventI :> body.` + optional `internal_event/5` (DALI2 extension) |
 | Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
-| FIPA messages | `messageA(to, send_message(confirm(fact), Me))` | Same — 4 with special semantics, rest as handlers |
+| FIPA messages | `messageA(to, confirm(fact, Me))` | Same — 4 with special semantics, rest as handlers. DALI-original arity (e.g. `propose(Action, Content, Me)`, `query_ref(Query, Name, Me)`) |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
