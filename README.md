@@ -396,8 +396,8 @@ All DALI syntax works in DALI2. The table below shows what DALI2 **also** accept
 | Goals | `obt_goal(goal) :- plan.` | Yes — identical | — |
 | Test goals | `test_goal(goal) :- plan.` | Yes — identical | — |
 | Residue goals | `tenta_residuo(goal)` | Yes — identical | Also `achieve(goal)` |
-| Past check | `evp(event)` / `eventP(args)` | Yes — identical | Also `has_past(event)` |
-| Belief check | `clause(isa(fact,_,_),_)` | Yes — accepted | Also `believes(fact)` |
+| Past check | `evp(event)` / `eventP(args)` / `past(event,_,_)` | Yes — all accepted | Also `has_past(event)` |
+| Belief check | `clause(isa(fact,_,_),_)` / `isa(fact,_,_)` | Yes — both accepted | Also `believes(fact)` |
 | Export past (~/) | `head ~/ past1, past2.` | Yes — identical | — |
 | Export past (</) | `head </ past1, past2.` | Yes — identical | — |
 | Export past (?/) | `head ?/ past1, past2.` | Yes — identical | — |
@@ -445,6 +445,12 @@ These DALI-specific constructs are recognized directly by DALI2 — no rewriting
 | `message(To, performative(Content, Me))` | Works — direct DALI message form |
 | `message(IndTo, To, IndS, S, Lang, O, M)` | Works — DALI 7-arg internal transport format |
 | `meta/3`, `ontology/3` | Accepted silently (DALI2 uses inline `ontology/1` instead) |
+| `told(AgM, IndM, Lang, Ont, Content, Pri)` | DALI 6-arg told — extracts Content + Priority, ignores transport fields |
+| `past(Event, _, _)` / `past(Event)` in body | Mapped to `has_past(Event)` |
+| `isa(Fact, _, _)` in body | Mapped to `believes(Fact)` |
+| `save_on_log_file(X)` in body | Mapped to `log(X)` |
+| `drop_past(Event)` / `add_past(Event)` / `look_up_past(Event)` | Runtime past management primitives — work as in DALI |
+| `set_past(Event, Config)` | Reconfigures past lifetime — executes Config as body term |
 | `learn_if(Head, Trigger, Cond) :- Body` | Stored in `agent_learn_if/5` for runtime evaluation |
 | `manage_lg(Clause)` / `manage_lg(Clause, From)` | Injects clause into agent KB via `confirm(learn(...))` |
 | `send_msg_learn(Clause, Author, Target)` | Sends clause to another agent via FIPA `confirm(learn(...))` |

@@ -461,6 +461,17 @@ told(_, Pattern, Priority).            %% 3-arg bare: accept unconditionally
 told(_, Pattern).                      %% 2-arg bare: accept unconditionally (priority=0)
 ```
 
+**DALI 6-arg format (retrocompatibility):**
+
+DALI's original `told/6` includes transport metadata (agent name, individual name, language, ontology). DALI2 accepts this form and extracts only the content (arg 5) and priority (arg 6):
+
+```prolog
+told(AgM, IndM, Language, Ontology, Pattern, Priority) :- Body.
+told(AgM, IndM, Language, Ontology, Pattern, Priority).
+```
+
+The transport fields are ignored because DALI2 uses Redis (language/ontology metadata is not carried per-message).
+
 If an agent has **any** `told` rules, only messages matching at least one `told` pattern **and** whose body condition succeeds are accepted. Messages not matching are rejected with a log entry. If an agent has **no** `told` rules, all messages are accepted (backward compatible).
 
 **Priority Queue**: When an agent has `told` rules with priority values, incoming messages are **sorted by priority** (highest first) before processing. This mirrors DALI's priority-based message queue.
@@ -1060,6 +1071,7 @@ These predicates are available inside rule bodies:
 |-----------|-------------|
 | `log(Format, Args)` | Log a formatted message (uses `format/2` syntax) |
 | `log(Message)` | Log a simple message |
+| `save_on_log_file(X)` | DALI compat — mapped to `log(X)` |
 
 ### Beliefs
 
@@ -1078,6 +1090,10 @@ These predicates are available inside rule bodies:
 | `has_remember(Event)` | Check if event is in remember tier |
 | `has_remember(Event, Time)` | Check remember with timestamp |
 | `has_confirmed(Fact)` | Check if fact was confirmed via FIPA confirm |
+| `drop_past(Event)` | Remove all past entries for Event (DALI compat) |
+| `add_past(Event)` | Assert Event into past at current time (DALI compat) |
+| `look_up_past(Event)` | Succeed if Event is in past (DALI compat) |
+| `set_past(Event, Config)` | Reconfigure past lifetime — executes Config as body term (DALI compat) |
 
 ### Actions & Helpers
 
@@ -1199,13 +1215,17 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Remember limit | `remember_event_mod(ev, number(5), last).` | `remember_event_mod(ev, number(5), last).` (identical) |
 | Told | `told(_, pattern, pri) :- body.` | `told(_, pattern, pri) :- body.` (identical) |
 | Told (no priority) | `told(_, pattern) :- body.` | `told(_, pattern) :- body.` (identical) |
+| Told (6-arg DALI) | `told(AgM, IndM, Lang, Ont, Content, Pri)` | Accepted — extracts Content + Pri, ignores transport fields |
 | Tell | `tell(_, _, pattern) :- body.` | `tell(_, _, pattern) :- body.` (identical) |
 | Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `messageA(dest, performative(content, Me))` for FIPA types and `send(dest, content)` as shorthand) |
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
+| Past (direct) | `past(event, _, _)` / `past(event)` | Accepted — mapped to `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |
 | Belief check | `clause(isa(fact,_,_),_)` | Same, or `believes(fact)` |
+| Belief (direct) | `isa(fact, _, _)` | Accepted — mapped to `believes(fact)` |
 | Ontology | `meta/3` + OWL | `ontology(same_as(a,b)).` (`meta/3` accepted as no-op) |
-| Message forms | `messageA/2,3`, `message/2`, `message/7` | All accepted — auto-converted to `send/2` |
+| Logging | `save_on_log_file(X)` | Accepted — mapped to `log(X)` |
+| Past management | `drop_past/1`, `add_past/1`, `look_up_past/1`, `set_past/2` | All accepted — operate on DALI2 past event store |
 | Learning (pattern-assoc.) | — | `learn_from(event, outcome) :- cond.` |
 | Learning (code-injection) | `learn_if/3`, `manage_lg/2`, `send_msg_learn/3` | All accepted — `learn_if/3` stored, `manage_lg` injects via FIPA |
 | Periodic | — | `every(seconds, goal).` |

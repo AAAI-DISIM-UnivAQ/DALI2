@@ -968,6 +968,12 @@ execute_body(Name, log(Format, Args)) :- !,
 execute_body(Name, log(Message)) :- !,
     log_agent(Name, "~w", [Message]).
 
+% DALI retrocompatibility: save_on_log_file(X) → log(X)
+% In DALI this wrote the event to the agent's log file on disk.
+% In DALI2 we route it to the in-memory log.
+execute_body(Name, save_on_log_file(X)) :- !,
+    log_agent(Name, "~w", [X]).
+
 % assert_belief(Fact) - Add a belief
 execute_body(Name, assert_belief(Fact)) :- !,
     assert(agent_belief_rt(Name, Fact)),
@@ -997,6 +1003,24 @@ execute_body(Name, has_past(Event, Time)) :- !,
     ; agent_past_event(Name, injected(Event), Time, _) -> true
     ; agent_past_event(Name, internal(Event), Time, _)
     ).
+
+% DALI past management primitives — drop_past/add_past/look_up_past/set_past.
+% These appear in DALI agent bodies as direct calls to manage the past store.
+% drop_past(Event)       — remove all past entries for Event
+% add_past(Event)        — assert Event into past at current time
+% look_up_past(Event)    — succeed if Event is in past (like has_past/1)
+% set_past(Event, Conf)  — reconfigure past/remember lifetime for Event
+execute_body(Name, drop_past(Event)) :- !,
+    retractall(agent_past_event(Name, Event, _, _)),
+    log_agent(Name, "drop_past: ~w", [Event]).
+execute_body(Name, add_past(Event)) :- !,
+    get_time(S), T is truncate(S * 1000),
+    assert(agent_past_event(Name, Event, T, program)).
+execute_body(Name, look_up_past(Event)) :- !,
+    (agent_past_event(Name, Event, _, _) -> true ; event_in_past(Name, Event)).
+execute_body(Name, set_past(Event, Config)) :- !,
+    log_agent(Name, "set_past: ~w config=~w", [Event, Config]),
+    ( catch(execute_body(Name, Config), _, true) -> true ; true ).
 
 % present(Event) - Check if event is currently being processed (present/1)
 execute_body(_, present(Event)) :- !, present(Event).

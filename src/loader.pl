@@ -318,6 +318,14 @@ transform_body(Term, achieve(BaseTerm)) :-
 transform_body(Term, test_goal_check(BaseTerm)) :-
     nonvar(Term),
     strip_suffix_term(Term, BaseTerm, 'T'), !.
+%% DALI retrocompatibility: past(Event, _, _) / past(Event) directly in body.
+%% In DALI these appear as direct calls (not wrapped in clause/2).
+%% Mapped to has_past/1 so they work with the DALI2 past event store.
+transform_body(past(Event, _, _), has_past(Event)) :- !.
+transform_body(past(Event), has_past(Event)) :- !.
+%% DALI retrocompatibility: isa(Fact, _, _) directly in body.
+%% In DALI, beliefs are stored as isa/3 triples. Map to believes/1.
+transform_body(isa(Fact, _, _), believes(Fact)) :- !.
 transform_body(Term, Term).
 
 %% transform_message_send(+MessageTerm, -Send)
@@ -621,6 +629,17 @@ process_term(test_goal(G)) :- !,
 %% told(From, Pattern).                     2-arg bare (priority=0, body=true)
 %% tell(To, From, Pattern) :- Body.         3-arg with body
 %% tell(To, From, Pattern).                 3-arg bare (body=true)
+%%
+%% DALI original told/6 —
+%%   told(AgM, IndM, Language, Ontology, Content, Priority)
+%% Maps to told/3 by extracting Content (arg 5) and Priority (arg 6).
+%% The transport fields (AgM, IndM, Language, Ontology) are ignored because
+%% DALI2 uses Redis (language/ontology metadata is not carried per-message).
+process_term((told(_, _, _, _, Pat, Pri) :- Body)) :- !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri, TB)) ; true).
+process_term(told(_, _, _, _, Pat, Pri)) :- !,
+    (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri, true)) ; true).
 process_term((told(_, Pat, Pri) :- Body)) :- !,
     transform_body(Body, TB),
     (ctx(Ag) -> assert(agent_told(Ag, Pat, Pri, TB)) ; true).
