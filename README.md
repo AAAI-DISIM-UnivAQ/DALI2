@@ -8,7 +8,7 @@ DALI2 is the evolution of the [DALI](https://github.com/AAAI-DISIM-UnivAQ/DALI) 
 
 - **Identical DALI syntax** — no prefix needed, same operators (`:>`, `:<`, `~/`, `</`, `?/`) and suffixes (`E`, `I`, `A`, `N`, `P`) as the original DALI, plus `?>` for DALI2's edge-triggered condition-action rules
 - **Single-file multi-agent** — define all agents in one `.pl` file; `:- agent(name).` sets the context for subsequent rules
-- **Full DALI feature set** — reactive rules, internal events, goals, constraints, learning, ontologies, tell/told filtering (with body conditions), multi-events (with delta-t), and more
+- **Full DALI feature set** — reactive rules, internal events, goals, constraints, learning (pattern-association + code-injection via FIPA), ontologies, tell/told filtering (with body conditions), multi-events (with delta-t), and more
 - **Process-per-agent architecture** — each agent runs as a separate OS process
 - **Redis star topology** — agents communicate via Redis pub/sub (`LINDA` channel for messages, `LOGS` channel for monitoring)
 - **Integrated web UI** — dashboard, log viewer, message sender, agent inspector
@@ -416,7 +416,7 @@ All DALI syntax works in DALI2. The table below shows what DALI2 **also** accept
 | Condition monitors | `when(condition) :- body.` |
 | Helpers | `helper(head) :- body.` |
 | Action proposal handlers | `on_proposal(action) :- body.` |
-| Learning rules | `learn_from(event, outcome) :- body.` |
+| Pattern-association learning | `learn_from(event, outcome) :- body.` |
 | AI Oracle | `ask_ai(context, result)` |
 | Blackboard (Redis) | `bb_read`/`bb_write`/`bb_remove` |
 
@@ -445,6 +445,9 @@ These DALI-specific constructs are recognized directly by DALI2 — no rewriting
 | `message(To, performative(Content, Me))` | Works — direct DALI message form |
 | `message(IndTo, To, IndS, S, Lang, O, M)` | Works — DALI 7-arg internal transport format |
 | `meta/3`, `ontology/3` | Accepted silently (DALI2 uses inline `ontology/1` instead) |
+| `learn_if(Head, Trigger, Cond) :- Body` | Stored in `agent_learn_if/5` for runtime evaluation |
+| `manage_lg(Clause)` / `manage_lg(Clause, From)` | Injects clause into agent KB via `confirm(learn(...))` |
+| `send_msg_learn(Clause, Author, Target)` | Sends clause to another agent via FIPA `confirm(learn(...))` |
 
 ### DALI2 additional syntax (not in DALI)
 
@@ -460,7 +463,7 @@ These are **new features** that don't exist in DALI. They are optional — DALI 
 | Helpers | `helper(head) :- body.` | |
 | Action proposal handlers | `on_proposal(action) :- body.` | DALI2 exposes this as user syntax |
 | Inline ontology | `ontology(same_as(a,b)).` | Replaces external OWL/SPARQL |
-| Learning rules | `learn_from(event, outcome) :- body.` | |
+| Pattern-association learning | `learn_from(event, outcome) :- body.` | DALI2 native learning paradigm |
 | AI Oracle | `ask_ai(context, result)` | |
 | Blackboard | `bb_read`/`bb_write`/`bb_remove` | Replaces Linda tuple space |
 

@@ -127,6 +127,7 @@
 :- dynamic agent_ontology_file/2.
 :- dynamic agent_on_proposal/3.
 :- dynamic agent_internal_config/6.
+:- dynamic agent_learn_if/5.           % agent_learn_if(Agent, Head, Trigger, Condition, Body) — DALI learn_if/3
 :- dynamic current_agent/1.           % tracks the "current" agent for prefix-less rules
 
 %% ============================================================
@@ -695,10 +696,26 @@ process_term((learn_from(E, O) :- B)) :- !,
 process_term(learn_from(E, O)) :- !,
     (ctx(Ag) -> assert(agent_learn_rule(Ag, E, O, true)) ; true).
 
-%% DALI learning compatibility stubs — recognized so DALI code loads cleanly.
-%% These are no-ops in DALI2 (which uses learn_from/2 pattern association).
-process_term((learn_if(_, _, _) :- _)) :- !, true.
-process_term(learn_if(_, _, _)) :- !, true.
+%% DALI learning compatibility — learn_if/3 is now stored as agent_learn_if/5
+%% so that manage_lg can evaluate whether to accept an incoming clause.
+%% Form: learn_if(Head, Trigger, Condition) :- Body.
+%%   Head      — the clause head pattern to be learned
+%%   Trigger   — event/situation that triggers evaluation
+%%   Condition — additional condition that must hold
+%%   Body      — body to execute after learning (optional)
+process_term((Name:learn_if(H, T, C) :- B)) :- !,
+    transform_body(B, TB), assert(agent_learn_if(Name, H, T, C, TB)).
+process_term(Name:learn_if(H, T, C)) :- !,
+    assert(agent_learn_if(Name, H, T, C, true)).
+process_term((learn_if(H, T, C) :- B)) :- !,
+    transform_body(B, TB),
+    (ctx(Ag) -> assert(agent_learn_if(Ag, H, T, C, TB)) ; true).
+process_term(learn_if(H, T, C)) :- !,
+    (ctx(Ag) -> assert(agent_learn_if(Ag, H, T, C, true)) ; true).
+
+%% modified_clause/2 and txt_clause/2 — DALI SICStus-specific file-based
+%% persistence. No equivalent in DALI2 (Redis-based persistence is used instead).
+%% Recognized and silently ignored so DALI code loads without errors.
 process_term((modified_clause(_, _) :- _)) :- !, true.
 process_term(modified_clause(_, _)) :- !, true.
 process_term((txt_clause(_, _) :- _)) :- !, true.

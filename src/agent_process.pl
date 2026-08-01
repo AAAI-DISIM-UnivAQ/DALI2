@@ -35,6 +35,7 @@ user:message_hook(_, informational, _) :- !.
 :- dynamic agent_condition_state/2.      % agent_condition_state(CondId, true/false)
 :- dynamic agent_multi_fired/1.          % agent_multi_fired(MultiId)
 :- dynamic agent_learned_rt/2.           % agent_learned_rt(Pattern, Outcome)
+:- dynamic agent_learned_clause/2.       % agent_learned_clause(Name, Clause) — injected via FIPA confirm(learn(...))
 :- dynamic agent_goal_status/2.          % agent_goal_status(GoalId, Status)
 :- dynamic agent_last_internal_fire/2.   % agent_last_internal_fire(InternalId, LastTime)
 :- dynamic agent_internal_snapshot/2.    % agent_internal_snapshot(InternalId, Snapshot)
@@ -200,6 +201,23 @@ should_allow_send_local(Sender, Content) :-
 %% FIPA SEMANTICS
 %% ============================================================
 
+%% DALI learning retrocompatibility: confirm(learn(Clause)) — code-injection via FIPA.
+%% The incoming clause is asserted directly into the per-agent KB (loader:agent_clause/3)
+%% so it becomes immediately callable by all rule bodies.  This replicates the
+%% manage_lg/2 behaviour of the original DALI system.
+handle_fipa_semantics_local(Name, _From, confirm(learn(Clause)), T) :- !,
+    (callable(Clause) ->
+        ( Clause = (Head :- Body) ->
+            assert(loader:agent_clause(Name, Head, Body))
+        ;
+            assert(loader:agent_clause(Name, Clause, true))
+        ),
+        assert(agent_learned_clause(Name, Clause)),
+        record_past_local(learned(Clause), T),
+        log_local(Name, "Learned clause via FIPA confirm(learn(...)): ~w", [Clause])
+    ;
+        log_local(Name, "learn: non-callable clause ignored: ~w", [Clause])
+    ).
 handle_fipa_semantics_local(Name, _From, confirm(Fact), T) :- !,
     record_past_local(confirmed(Fact), T),
     log_local(Name, "Fact confirmed: ~w", [Fact]).
@@ -883,6 +901,20 @@ execute_body_local(Name, reject_proposal(To, Action, Reason)) :- !,
     execute_body_local(Name, send(To, reject_proposal(Action, Reason))).
 execute_body_local(Name, reject_proposal(To, Action)) :- !,
     execute_body_local(Name, send(To, reject_proposal(Action))).
+
+%% Learning — DALI retrocompatibility: send_msg_learn(Clause, Author, Target)
+%% sends confirm(learn(Clause)) to Target, which will inject the clause into
+%% that agent's KB via the FIPA handler above.
+execute_body_local(Name, send_msg_learn(Clause, _Author, Target)) :- !,
+    execute_body_local(Name, send(Target, confirm(learn(Clause)))).
+
+%% DALI learn_if/3 body execution: fires learn_if rules declared statically.
+%% manage_lg compatibility — assert if a matching learn_if rule allows it.
+execute_body_local(Name, manage_lg(Clause, From)) :- !,
+    agent_name(Name),
+    handle_fipa_semantics_local(Name, From, confirm(learn(Clause)), 0).
+execute_body_local(Name, manage_lg(Clause)) :- !,
+    execute_body_local(Name, manage_lg(Clause, unknown)).
 
 %% Learning
 execute_body_local(Name, learn(Pattern, Outcome)) :- !,

@@ -813,7 +813,11 @@ Ontology files are loaded when the agent starts.
 
 ## Learning Rules
 
-Agents can learn from experience. Learning rules are triggered when matching events occur. Learned associations are stored and can be queried later.
+DALI2 supports two learning paradigms:
+
+### Pattern-Association Learning (DALI2 native)
+
+Learn associations between events and outcomes. When an event matches `EventPattern` and `Condition` holds, the agent records `learned(Event, Outcome)`.
 
 **Syntax:**
 
@@ -821,8 +825,6 @@ Agents can learn from experience. Learning rules are triggered when matching eve
 learn_from(EventPattern, Outcome) :- Condition.
 learn_from(EventPattern, Outcome).              %% unconditional
 ```
-
-When an event matching `EventPattern` occurs (received, injected, or internal), and `Condition` succeeds, the agent records `learned(Event, Outcome)`.
 
 **Examples:**
 
@@ -836,7 +838,7 @@ learn_from(read_temp(T), overheating) :- T > 80.
 learn_from(read_temp(T), normal) :- T =< 80.
 ```
 
-**Using learned knowledge in rules:**
+**Using learned knowledge:**
 
 ```prolog
 read_tempE(T) :>
@@ -850,10 +852,68 @@ read_tempE(T) :>
     messageA(coordinator, send_message(sensor_data(T), Me)).
 ```
 
-**DSL predicates for learning:**
+**DSL predicates:**
 - `learn(Pattern, Outcome)` — manually record a learned association
 - `learned(Pattern, Outcome)` — check if something was learned
 - `forget(Pattern)` — remove all learned associations for a pattern
+
+### Code-Injection Learning (DALI retrocompatibility)
+
+Agents can dynamically inject **new rules** into other agents' knowledge bases via FIPA messaging. This replicates DALI's `manage_lg/2` mechanism for distributed learning.
+
+**Syntax:**
+
+```prolog
+%% Send a new clause to another agent
+send_msg_learn(Clause, Author, TargetAgent).
+
+%% The receiving agent gets the clause via FIPA confirm(learn(...))
+%% and asserts it into its per-agent KB — the clause becomes immediately callable
+```
+
+**Use cases:**
+- Teacher agent sends new rules to student agents
+- Coordinator distributes learned patterns across a swarm
+- Agent shares discovered heuristics with teammates
+
+**Examples:**
+
+```prolog
+:- agent(teacher, [cycle(2)]).
+
+%% Teacher discovers a new rule and shares it with the student
+discover_patternE(Pattern) :>
+    %% Build a new clause: "is_critical(X) :- Pattern = X"
+    NewClause = (is_critical(X) :- Pattern = X),
+    log("Teaching student new rule: ~w", [NewClause]),
+    send_msg_learn(NewClause, teacher, student).
+
+:- agent(student, [cycle(2)]).
+
+%% Student agent automatically accepts learned clauses via FIPA
+%% No explicit handler needed — DALI2 runtime handles confirm(learn(...))
+
+checkE(Item) :>
+    %% The learned clause is now callable:
+    ( is_critical(Item) ->
+        log("Item ~w is critical (learned from teacher)", [Item])
+    ;
+        log("Item ~w is normal", [Item])
+    ).
+```
+
+**DALI `learn_if/3` compatibility:**
+
+DALI's `learn_if(Head, Trigger, Condition)` declarations are now stored and can be queried:
+
+```prolog
+%% Declare a learning acceptance rule (stored in agent_learn_if/5)
+learn_if(new_heuristic(_), past(training_complete), true).
+```
+
+This feature is primarily for static loading of DALI codebases. For dynamic runtime learning, use `send_msg_learn/3`.
+
+**Security note:** Incoming `confirm(learn(Clause))` messages are validated (must be `callable/1`) but not sandboxed. Only use code-injection learning in trusted multi-agent environments where all agents are part of the same logical system.
 
 ---
 
@@ -1146,7 +1206,8 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Belief check | `clause(isa(fact,_,_),_)` | Same, or `believes(fact)` |
 | Ontology | `meta/3` + OWL | `ontology(same_as(a,b)).` (`meta/3` accepted as no-op) |
 | Message forms | `messageA/2,3`, `message/2`, `message/7` | All accepted — auto-converted to `send/2` |
-| Learning | — | `learn_from(event, outcome) :- cond.` |
+| Learning (pattern-assoc.) | — | `learn_from(event, outcome) :- cond.` |
+| Learning (code-injection) | `learn_if/3`, `manage_lg/2`, `send_msg_learn/3` | All accepted — `learn_if/3` stored, `manage_lg` injects via FIPA |
 | Periodic | — | `every(seconds, goal).` |
 | Condition monitor | — | `when(condition) :- body.` |
 | Helper | — | `helper(head) :- body.` |
