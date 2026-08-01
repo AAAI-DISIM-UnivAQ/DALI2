@@ -815,6 +815,23 @@ execute_body_local(Name, log(Message)) :- !,
 execute_body_local(Name, save_on_log_file(X)) :- !,
     log_local(Name, "~w", [X]).
 
+%% DALI retrocompatibility: now/1 and datime/1 — SICStus built-ins.
+%%   now(Time)     — Time is the current wall time in seconds (integer).
+%%   datime(D)     — D = datime(Year, Month, Day, Hour, Min, Sec).
+%% In SWI-Prolog we use get_time/1 and stamp_date_time/2.
+execute_body_local(_, now(Time)) :- !,
+    get_time(Stamp), Time is truncate(Stamp).
+execute_body_local(_, datime(D)) :- !,
+    get_time(Stamp),
+    stamp_date_time(Stamp, DateTime, 0),
+    date_time_value(year, DateTime, Y),
+    date_time_value(month, DateTime, Mo),
+    date_time_value(day, DateTime, Da),
+    date_time_value(hour, DateTime, H),
+    date_time_value(minute, DateTime, Mi),
+    date_time_value(second, DateTime, S),
+    D = datime(Y, Mo, Da, H, Mi, S).
+
 %% Beliefs
 execute_body_local(Name, assert_belief(Fact)) :- !,
     assert(agent_belief_rt(Fact)), log_local(Name, "Belief added: ~w", [Fact]).

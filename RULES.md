@@ -356,6 +356,8 @@ deltat(Seconds).                                           %% global delta-t (DA
 The optional `within(Seconds)` specifies a **delta-t** (simultaneity interval): all events must have occurred within the given time window. Without `within`, events are matched regardless of when they occurred.
 
 > **DALI compatibility:** The directive `deltat(N).` (or `deltaT(N).`) sets a **global** simultaneity interval that applies to all multi-event rules that don't have an inline `within/1`. This mirrors DALI's original `deltat/1` mechanism. Inline `within/1` takes priority over the global `deltat/1`.
+>
+> **DALI shorthand:** The original DALI tokenizer also accepts `t<N>.` (e.g. `t60.`) as a shorthand for `deltat(N)`. DALI2 recognizes this form too — any atom matching `t` followed by digits is treated as `deltat(N)`. This lets you paste DALI code using `t60.` without modification.
 
 **Examples:**
 
@@ -552,6 +554,7 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication, 
 | `cancel(Action)` | `messageA(To, cancel(Action, Me))` | Normal handler (DALI2 extension — DALI has receive only) |
 | `cfp(Action, Content)` | `messageA(To, cfp(Action, Content, Me))` | Normal handler (DALI has receive only) |
 | `reply(Content)` | `messageA(To, reply(Content, Me))` | Normal handler (DALI has receive only) |
+| `request(Action)` | `messageA(To, request(Action, Me))` | Normal handler |
 
 > **Shorthand:** `send(To, Content)` is also accepted as equivalent to `messageA(To, send_message(Content, Me))`.
 >
@@ -1073,6 +1076,13 @@ These predicates are available inside rule bodies:
 | `log(Message)` | Log a simple message |
 | `save_on_log_file(X)` | DALI compat — mapped to `log(X)` |
 
+### Time
+
+| Predicate | Description |
+|-----------|-------------|
+| `now(Time)` | DALI/SICStus compat — `Time` is current wall time in seconds (integer) |
+| `datime(D)` | DALI/SICStus compat — `D = datime(Year, Month, Day, Hour, Min, Sec)` |
+
 ### Beliefs
 
 | Predicate | Description |
@@ -1201,7 +1211,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Remember event | `rem/1` | `eventR` → `has_remember(event)` (body only) |
 | Obtain goal | `obg/1` (postfix G) | `goalG` → `obt_goal(goal)` (or `obt_goal/1` directly) |
 | Test goal | `tesg/1` (postfix T) | `goalT` → `test_goal(goal)` (or `test_goal/1` directly) |
-| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` (`deltat/1` also accepted) |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` / `t60.` | `ev1E, ev2E, within(N) :> body.` (`deltat/1` and `t<N>` shorthand also accepted) |
 | Event preconditions | `cd(event) :- body.` / `eve_cond/1` | `eventE :< body.` (`cd/1` also accepted) |
 | Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |
@@ -1217,7 +1227,7 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Told (no priority) | `told(_, pattern) :- body.` | `told(_, pattern) :- body.` (identical) |
 | Told (6-arg DALI) | `told(AgM, IndM, Lang, Ont, Content, Pri)` | Accepted — extracts Content + Pri, ignores transport fields |
 | Tell | `tell(_, _, pattern) :- body.` | `tell(_, _, pattern) :- body.` (identical) |
-| Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `messageA(dest, performative(content, Me))` for FIPA types and `send(dest, content)` as shorthand) |
+| Send message | `messageA(dest, send_message(content, Me))` | Same (DALI2 also accepts `messageA(dest, performative(content, Me))` for FIPA types incl. `request` and `send(dest, content)` as shorthand) |
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
 | Past (direct) | `past(event, _, _)` / `past(event)` | Accepted — mapped to `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |
@@ -1225,6 +1235,9 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Belief (direct) | `isa(fact, _, _)` | Accepted — mapped to `believes(fact)` |
 | Ontology | `meta/3` + OWL | `ontology(same_as(a,b)).` (`meta/3` accepted as no-op) |
 | Logging | `save_on_log_file(X)` | Accepted — mapped to `log(X)` |
+| Time | `now(Time)`, `datime(D)` | Accepted — SICStus built-ins mapped to SWI-Prolog equivalents |
+| Event injection directive | `:- assert(ev_normal(Ag, Ev, Pri))` | Recognized and ignored with warning (use web UI / REST API) |
+| File persistence | `modified_clause/2`, `txt_clause/2` | Silently ignored (DALI2 uses Redis) |
 | Past management | `drop_past/1`, `add_past/1`, `look_up_past/1`, `set_past/2` | All accepted — operate on DALI2 past event store |
 | Learning (pattern-assoc.) | — | `learn_from(event, outcome) :- cond.` |
 | Learning (code-injection) | `learn_if/3`, `manage_lg/2`, `send_msg_learn/3` | All accepted — `learn_if/3` stored, `manage_lg` injects via FIPA |

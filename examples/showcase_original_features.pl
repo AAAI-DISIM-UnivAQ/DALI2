@@ -2,8 +2,9 @@
 %% Demonstrates DALI-original rule types and DSL predicates in a single file,
 %% using only standard DALI syntax (operators :>, :<, ~/, </, ?/, :~ and
 %% suffixes E, I, A, N, P) and FIPA communication (messageA/send_message).
-%% Also demonstrates DALI retrocompatibility features: deltat/1, cd/1,
-%% :< on E-suffix events, and DALI message forms (message/2, messageA/3).
+%% Also demonstrates DALI retrocompatibility features: deltat/1, t<N> shorthand,
+%% cd/1, :< on E-suffix events, DALI message forms (message/2, messageA/3),
+%% SICStus time built-ins (now/1, datime/1), and FIPA request performative.
 %% No DALI2-only extensions (every, when, helper, learn_from, ontology,
 %% on_proposal, bb_read/bb_write/bb_remove, ?>, internal_event/5).
 %% ask_ai is kept (graceful fallback when not configured).
@@ -155,6 +156,7 @@ tell(_, _, propose(_,_)) :- believes(status(active)).  %% send proposals only wh
 tell(_, _, confirm(_)) :- true.
 tell(_, _, query_ref(_,_)) :- true.
 tell(_, _, analyze(_)) :- true.
+tell(_, _, request(_)) :- true.    %% allow FIPA request performative
 
 %% Multi-event: fire when both sensor data AND an alert
 %% have been received within 10 seconds of each other.
@@ -167,10 +169,16 @@ sensor_dataE(_), alertE(_, _), within(10) :>
 %% Multi-events without inline within/1 will use this global interval.
 deltat(30).
 
+%% DALI retrocompatibility: t<N> shorthand (DALI tokenizer form of deltat(N))
+%% The original DALI tokenizer rewrites any atom matching /^t<digits>$/ to
+%% deltat(N). DALI2 recognizes this form too. Here we override the global
+%% interval to 60 seconds using the shorthand.
+t60.
+
 %% Multi-event using global deltat (no inline within/1)
-%% Fires when both events occurred within 30 seconds (from deltat/1 above).
+%% Fires when both events occurred within 60 seconds (from t60 above).
 loginE(User), authorizeE(User) :>
-    log("MULTI-EVENT (deltat): User ~w fully authenticated", [User]).
+    log("MULTI-EVENT (t60): User ~w fully authenticated", [User]).
 
 %% DALI retrocompatibility: direct message/2 form (auto-converted to send/2)
 %% This is equivalent to messageA(logger, send_message(direct_msg(T), Me)).
@@ -199,6 +207,21 @@ emergencyE(Type, Value) :>
 calibration_requestE :>
     log("Processing calibration request"),
     messageA(sensor, send_message(calibration_done, Me)).
+
+%% DALI retrocompatibility: now/1 and datime/1 (SICStus built-ins)
+%% These are mapped to SWI-Prolog's get_time/1 and stamp_date_time/2.
+%% Demonstrates that DALI code using SICStus time primitives works unchanged.
+timestampE :>
+    now(T),
+    log("Current time (now/1): ~w seconds", [T]),
+    datime(D),
+    log("Current datetime (datime/1): ~w", [D]).
+
+%% DALI retrocompatibility: FIPA request performative
+%% request/2 is now in the supported FIPA performatives list.
+requestE(Action) :>
+    log("FIPA REQUEST received: ~w", [Action]),
+    messageA(worker, request(Action, Me)).
 
 %% FIPA handlers
 confirmE(Fact) :>
@@ -275,6 +298,7 @@ told(_, propose(_,_), 100) :- believes(available(true)).  %% accept proposals on
 told(_, confirm(_), 90) :- true.
 told(_, query_ref(_,_), 80) :- true.
 told(_, inform(_, _), 70) :- true.
+told(_, request(_), 75) :- true.    %% accept FIPA request performative
 
 %% Proposal handler (DALI proposeE syntax — receives propose messages)
 proposeE(analyze(Data), Content) :>
@@ -283,6 +307,12 @@ proposeE(analyze(Data), Content) :>
     log("PROPOSAL: Accepting analyze(~w) from ~w", [Data, Sender]),
     accept_proposal(Sender, analyze(Data), []),
     do(analyze(Data)).
+
+%% FIPA request handler (receives request performative from coordinator)
+requestE(Action) :>
+    from(Sender),
+    log("REQUEST: ~w from ~w", [Action, Sender]),
+    messageA(coordinator, inform(request_received(Action), Me)).
 
 proposeE(impossible_task, Content) :>
     from(Sender),

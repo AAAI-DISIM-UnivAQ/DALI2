@@ -45,6 +45,9 @@
 :- use_module(library(lists)).
 :- use_module(library(process)).
 
+%% execute_body/2 clauses are intentionally grouped by feature, not contiguous.
+:- discontiguous execute_body/2.
+
 %% Process management state
 :- dynamic agent_file_setting/1.
 :- dynamic node_name_setting/1.     % node_name_setting(NodeName)
@@ -974,6 +977,22 @@ execute_body(Name, log(Message)) :- !,
 execute_body(Name, save_on_log_file(X)) :- !,
     log_agent(Name, "~w", [X]).
 
+% DALI retrocompatibility: now/1 and datime/1 — SICStus built-ins.
+%   now(Time)     — Time is the current wall time in seconds (integer).
+%   datime(D)     — D = datime(Year, Month, Day, Hour, Min, Sec).
+execute_body(_, now(Time)) :- !,
+    get_time(Stamp), Time is truncate(Stamp).
+execute_body(_, datime(D)) :- !,
+    get_time(Stamp),
+    stamp_date_time(Stamp, DateTime, 0),
+    date_time_value(year, DateTime, Y),
+    date_time_value(month, DateTime, Mo),
+    date_time_value(day, DateTime, Da),
+    date_time_value(hour, DateTime, H),
+    date_time_value(minute, DateTime, Mi),
+    date_time_value(second, DateTime, S),
+    D = datime(Y, Mo, Da, H, Mi, S).
+
 % assert_belief(Fact) - Add a belief
 execute_body(Name, assert_belief(Fact)) :- !,
     assert(agent_belief_rt(Name, Fact)),
@@ -1026,15 +1045,34 @@ execute_body(Name, set_past(Event, Config)) :- !,
 execute_body(_, present(Event)) :- !, present(Event).
 
 % do(Action) - Execute an action defined with agent:do
+% DALI semantics: an action fires only if its precondition (actionA :< Pre)
+% holds (or there is no precondition). Actions with a defining clause run its
+% body; actions with no clause are atomic and are just recorded as done.
 execute_body(Name, do(Action)) :- !,
-    (loader:agent_action(Name, ActionPattern, ActionBody),
-     copy_term(ActionPattern-ActionBody, Action-BodyCopy) ->
-        log_agent(Name, "Executing action: ~w", [Action]),
+    (action_precondition_holds(Name, Action) ->
         get_time(Stamp), T is truncate(Stamp * 1000),
-        record_past(Name, did(Action), T),
-        execute_body(Name, BodyCopy)
+        (loader:agent_action(Name, ActionPattern, ActionBody),
+         copy_term(ActionPattern-ActionBody, Action-BodyCopy) ->
+            log_agent(Name, "Executing action: ~w", [Action]),
+            record_past(Name, did(Action), T),
+            execute_body(Name, BodyCopy)
+        ;
+            log_agent(Name, "Executing atomic action: ~w", [Action]),
+            record_past(Name, did(Action), T)
+        )
     ;
-        log_agent(Name, "Unknown action: ~w", [Action])
+        log_agent(Name, "Action precondition not met: ~w", [Action])
+    ).
+
+%% action_precondition_holds(+Name, +Action) — true if the action has no
+%% precondition, or at least one matching precondition (actionA :< Pre) holds.
+%% Mirrors action_precondition_holds_local/2 in agent_process.pl.
+action_precondition_holds(Name, Action) :-
+    (loader:agent_action_precond(Name, Key, _), \+ \+ Key = Action ->
+        ( loader:agent_action_precond(Name, K, Pre),
+          copy_term(K-Pre, Action-PreC),
+          catch(call_condition(Name, PreC), _, fail) )
+    ;   true
     ).
 
 % helper(Goal) - Call a helper predicate

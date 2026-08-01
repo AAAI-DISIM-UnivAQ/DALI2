@@ -390,9 +390,9 @@ All DALI syntax works in DALI2. The table below shows what DALI2 **also** accept
 | Event preconditions | `cd(event) :- body.` / `eve_cond/1` | Yes — `cd/1` accepted | Also `eventE :< precondition.` |
 | Constraints | `:~ constraint.` | Yes — identical | — |
 | Tell/told | `told(_, pattern, pri) :- body.` | Yes — identical | — |
-| FIPA messages | `messageA(to, perf(content, Me))` | Yes — identical | Also `send(to, content)` shorthand |
+| FIPA messages | `messageA(to, perf(content, Me))` | Yes — identical (all performatives incl. `request`) | Also `send(to, content)` shorthand |
 | All DALI message forms | `messageA/2,3`, `message/2`, `message/7` | Yes — all auto-converted to `send/2` | — |
-| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | Yes — `deltat/1` accepted as global fallback | Also `within(N)` inline (per-rule interval) |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` / `t60.` | Yes — `deltat/1` and `t<N>` shorthand accepted | Also `within(N)` inline (per-rule interval) |
 | Goals | `obt_goal(goal) :- plan.` | Yes — identical | — |
 | Test goals | `test_goal(goal) :- plan.` | Yes — identical | — |
 | Residue goals | `tenta_residuo(goal)` | Yes — identical | Also `achieve(goal)` |
@@ -438,22 +438,28 @@ These DALI-specific constructs are recognized directly by DALI2 — no rewriting
 
 | DALI construct | DALI2 behavior |
 |----------------|----------------|
-| `deltat(60).` | Works as global simultaneity interval for multi-events without inline `within/1` |
+| `deltat(60).` / `deltaT(60).` | Works as global simultaneity interval for multi-events without inline `within/1` |
+| `t60.` (DALI shorthand) | Recognized as `deltat(60)` — the DALI tokenizer rewrites any `t<digits>` atom to `deltat(N)` |
 | `cd(event) :- body.` | Works as external-event precondition (DALI `eve_cond` semantics) |
 | `eventE :< precondition.` | Works — routes to event precondition gate |
 | `messageA(To, send_message(C, Me), ReplyTo)` | Works — 3-arg form with explicit reply-to |
-| `message(To, performative(Content, Me))` | Works — direct DALI message form |
+| `message(To, performative(Content, Me))` | Works — direct DALI message form (all FIPA performatives including `request`) |
 | `message(IndTo, To, IndS, S, Lang, O, M)` | Works — DALI 7-arg internal transport format |
 | `meta/3`, `ontology/3` | Accepted silently (DALI2 uses inline `ontology/1` instead) |
 | `told(AgM, IndM, Lang, Ont, Content, Pri)` | DALI 6-arg told — extracts Content + Priority, ignores transport fields |
 | `past(Event, _, _)` / `past(Event)` in body | Mapped to `has_past(Event)` |
 | `isa(Fact, _, _)` in body | Mapped to `believes(Fact)` |
 | `save_on_log_file(X)` in body | Mapped to `log(X)` |
+| `now(Time)` in body | SICStus built-in — mapped to SWI `get_time/1` (integer seconds) |
+| `datime(D)` in body | SICStus built-in — mapped to SWI `stamp_date_time/2` → `datime(Y,Mo,D,H,Mi,S)` |
 | `drop_past(Event)` / `add_past(Event)` / `look_up_past(Event)` | Runtime past management primitives — work as in DALI |
 | `set_past(Event, Config)` | Reconfigures past lifetime — executes Config as body term |
 | `learn_if(Head, Trigger, Cond) :- Body` | Stored in `agent_learn_if/5` for runtime evaluation |
 | `manage_lg(Clause)` / `manage_lg(Clause, From)` | Injects clause into agent KB via `confirm(learn(...))` |
 | `send_msg_learn(Clause, Author, Target)` | Sends clause to another agent via FIPA `confirm(learn(...))` |
+| `:- assert(ev_normal(Ag, Ev, Pri))` | DALI load-time event injection directive — recognized and ignored with warning (use web UI / REST API to inject events in DALI2) |
+| `:- assert(ev_high(Ag, Ev, Pri))` | Same as above for high-priority events |
+| `modified_clause/2`, `txt_clause/2` | DALI SICStus file-based persistence — silently ignored (DALI2 uses Redis) |
 
 ### DALI2 additional syntax (not in DALI)
 
@@ -473,13 +479,14 @@ These are **new features** that don't exist in DALI. They are optional — DALI 
 | AI Oracle | `ask_ai(context, result)` | |
 | Blackboard | `bb_read`/`bb_write`/`bb_remove` | Replaces Linda tuple space |
 
-### Behavioral difference (one)
+### Behavioral differences (two)
 
 | Behavior | DALI | DALI2 | Why |
 |----------|------|-------|-----|
 | Action preconditions (`:<`) | Never checked (DALI bug — key mismatch in `term_expansion`) | Enforced correctly | DALI2 fixes the bug; agents relying on preconditions being ignored may behave differently |
+| Constraints (`:~`) | Expanded to `vincolo :- Cond` but never checked at runtime | Checked every cycle; violations logged | DALI2 enforces constraints as invariants |
 
-Everything else — event preconditions, multi-events, constraints, goals, tell/told, FIPA messages, export past rules, past lifetime, remember — behaves the same.
+Everything else — event preconditions, multi-events, goals, tell/told, FIPA messages, export past rules, past lifetime, remember — behaves the same.
 
 ## License
 

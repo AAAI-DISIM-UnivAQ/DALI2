@@ -310,6 +310,12 @@ A comprehensive showcase using **only standard DALI syntax** — the same operat
 - Direct `message/2` form (auto-converted to `send/2`) — coordinator agent
 - `messageA/3` with explicit ReplyTo — worker agent
 
+**Additional DALI retrocompatibility (recognized but not exercised in this file):**
+- `t<N>.` shorthand (e.g. `t60.`) — DALI tokenizer form of `deltat(N)`
+- `:- assert(ev_normal/ev_high(...))` — DALI load-time event injection (ignored with warning)
+- `now(Time)` / `datime(D)` — SICStus time built-ins (mapped to SWI-Prolog)
+- `request` FIPA performative — now in the supported performatives list
+
 ### Agents
 
 | Agent | Role | Features Demonstrated |

@@ -237,6 +237,9 @@ strip_suffix_term(Term, BaseTerm, Suffix) :-
 precond_key(Head, Key) :- strip_suffix_term(Head, Key, 'A'), !.
 precond_key(Head, Head).
 
+%% is_digit_char(+Char) — true if Char is a single digit character '0'-'9'.
+is_digit_char(C) :- char_type(C, digit).
+
 %% ============================================================
 %% BODY TRANSFORMATION
 %% ============================================================
@@ -365,6 +368,7 @@ fipa_performative(cancel).
 fipa_performative(execute_proc).
 fipa_performative(cfp).
 fipa_performative(reply).
+fipa_performative(request).
 
 parse_past_list((A, B), [A | Rest]) :- !,
     parse_past_list(B, Rest).
@@ -383,6 +387,20 @@ process_term(:- agent(Name)) :- !,
     assert(agent_def(Name, [])),
     retractall(current_agent(_)),
     assert(current_agent(Name)).
+
+%% DALI retrocompatibility: `:- assert(ev_normal(Agent, Event, Priority)).` and
+%% `:- assert(ev_high(Agent, Event, Priority)).` are DALI directives that inject
+%% external events into the agent's event queue at load time. In DALI2, event
+%% injection happens via Redis or the REST API, so these are recognized and
+%% silently ignored (with a warning) rather than asserting a useless global fact.
+process_term(:- assert(ev_normal(_, _, _))) :- !,
+    format(user_error, "DALI2 loader: ignoring DALI directive assert(ev_normal/3) — use the web UI or REST API to inject events.~n", []).
+process_term(:- assert(ev_high(_, _, _))) :- !,
+    format(user_error, "DALI2 loader: ignoring DALI directive assert(ev_high/3) — use the web UI or REST API to inject events.~n", []).
+process_term(:- assert(ev_normal(_))) :- !,
+    format(user_error, "DALI2 loader: ignoring DALI directive assert(ev_normal/1) — use the web UI or REST API to inject events.~n", []).
+process_term(:- assert(ev_high(_))) :- !,
+    format(user_error, "DALI2 loader: ignoring DALI directive assert(ev_high/1) — use the web UI or REST API to inject events.~n", []).
 
 %% Other directives
 process_term(:- Goal) :- !,
@@ -823,6 +841,17 @@ process_term((Head :- Body)) :-
 %% ============================================================
 %% CATCH-ALL: bare Prolog facts/rules as beliefs or ignored
 %% ============================================================
+
+%% DALI shorthand `t<N>.` (e.g. `t60.`) — tokenizer-level deltat(N).
+%% Must come BEFORE the bare-fact catch-all so it isn't stored as a belief.
+process_term(Fact) :-
+    atom(Fact),
+    atom_chars(Fact, [t | Digits]),
+    Digits \= [],
+    maplist(is_digit_char, Digits), !,
+    atom_chars(NumAtom, Digits),
+    atom_number(NumAtom, N),
+    (ctx(Ag) -> assert(agent_deltat(Ag, N)) ; true).
 
 %% Bare facts (no :-, no operator) → treat as belief for current agent
 process_term(Fact) :-
