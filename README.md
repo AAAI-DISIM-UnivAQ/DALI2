@@ -364,44 +364,61 @@ The web interface at `http://localhost:8080` provides:
 
 ## Comparison with DALI
 
+### Infrastructure (transparent to agent code)
+
 | Aspect | DALI (SICStus) | DALI2 (SWI-Prolog) |
 |--------|----------------|---------------------|
 | Source files | ~20 | 8 |
-| Agent definition | Multiple files (instances + type files) | Single `.pl` file (multi-agent) |
-| Process model | Separate process per agent + Linda server | **Separate OS process per agent** + Redis pub/sub |
+| Agent definition | Multiple files (instances + type files) | Single `.pl` file (multi-agent via `:- agent(name).`) |
+| Process model | Separate process per agent + Linda server | Separate OS process per agent + Redis pub/sub |
 | Communication | TCP sockets (Linda) | Redis star topology (pub/sub) |
 | Tokenizer | Complex (tokefun + togli_var + metti_var) | None (direct parsing with DALI operators) |
 | UI | Separate Python project (dalia) | Integrated web UI |
 | AI integration | External Python TCP service | Built-in (OpenRouter API) |
 | Docker setup | Complex (SICStus install) | Simple (swipl base image) |
-| Event syntax | `eventE(X) :> body.` | `eventE(X) :> body.` (identical!) |
-| Message sending | `messageA(dest, send_message(ev(X), Me))` | Same (DALI2 also accepts `messageA(dest, performative(ev(X), Me))` for FIPA types and `send(dest, ev(X))` as shorthand) |
-| Internal events | `eventI :> body.` (config auto-generated) | `eventI :> body.` + optional `internal_event/5` (DALI2 extension) |
-| Tell/told | `told(_, pattern, pri) :- true.` | `told(_, pattern, pri) :- true.` (identical!) |
-| FIPA messages | `messageA(to, confirm(fact, Me))` | Same — 4 with special semantics, rest as handlers. DALI-original arity (e.g. `propose(Action, Content, Me)`, `query_ref(Query, Name, Me)`) |
-| Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
-| Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
-| Event preconditions | `eve_cond/1` + `cd/1` | `eventE :< precondition.` (also accepts `cd/1` for compat) |
-| Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
-| Action proposal | `propose(A,C,Ag)` + `call_propose` | `on_proposal(action) :- body.` |
-| Past lifetime | `past_event(ev, 60).` | `past_event(ev, 60).` (identical!) |
-| Remember | `remember_event_mod(ev, number(5), last).` | `remember_event_mod(ev, number(5), last).` (identical!) |
-| Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical!) |
-| Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical!) |
-| Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical!) |
-| Residue goals | `tenta_residuo(goal)` | `tenta_residuo(goal)` or `achieve(goal)` |
-| Present events | Atomic (`en/1`) | Atomic (use in body of `:>`, `?>`, `when`) |
-| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` (also accepts `deltat/1` for compat) |
-| Constraints | `:~ constraint.` | `:~ constraint.` (identical!) |
-| Ontologies | `meta/3` + OWL files | `ontology(same_as(a,b)).` + `ontology_file` (`meta/3` accepted as no-op) |
-| Learning | `learning.pl` + constraints | `learn_from(event, outcome) :- body.` |
-| Message forms | `messageA/2,3`, `message/2`, `message/7` | All accepted — auto-converted to `send/2` |
-| Goals | `obt_goal(goal) :- plan.` | `obt_goal(goal) :- plan.` (identical!) |
-| Periodic tasks | — | `every(seconds, goal).` |
-| Condition monitors | — | `when(condition) :- body.` |
-| Helpers | — | `helper(head) :- body.` |
-| AI Oracle | — | `ask_ai(context, result)` |
-| Blackboard | Linda (TCP) | `bb_read`/`bb_write`/`bb_remove` (Redis) |
+
+### Agent language syntax
+
+All DALI syntax works in DALI2. The table below shows what DALI2 **also** accepts beyond the original forms.
+
+| Feature | DALI | DALI2 accepts DALI form? | DALI2 additional forms |
+|---------|------|--------------------------|----------------------|
+| External events | `eventE(X) :> body.` | Yes — identical | — |
+| Internal events | `eventI :> body.` (config auto-generated) | Yes — identical | Optional `internal_event/5` for explicit config |
+| Actions | `actionA(X) :- body.` | Yes — identical | — |
+| Action preconditions | `actionA :< precondition.` | Yes — same syntax | Now actually enforced (DALI had a bug — see below) |
+| Event preconditions | `cd(event) :- body.` / `eve_cond/1` | Yes — `cd/1` accepted | Also `eventE :< precondition.` |
+| Constraints | `:~ constraint.` | Yes — identical | — |
+| Tell/told | `told(_, pattern, pri) :- body.` | Yes — identical | — |
+| FIPA messages | `messageA(to, perf(content, Me))` | Yes — identical | Also `send(to, content)` shorthand |
+| All DALI message forms | `messageA/2,3`, `message/2`, `message/7` | Yes — all auto-converted to `send/2` | — |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | Yes — `deltat/1` accepted as global fallback | Also `within(N)` inline (per-rule interval) |
+| Goals | `obt_goal(goal) :- plan.` | Yes — identical | — |
+| Test goals | `test_goal(goal) :- plan.` | Yes — identical | — |
+| Residue goals | `tenta_residuo(goal)` | Yes — identical | Also `achieve(goal)` |
+| Past check | `evp(event)` / `eventP(args)` | Yes — identical | Also `has_past(event)` |
+| Belief check | `clause(isa(fact,_,_),_)` | Yes — accepted | Also `believes(fact)` |
+| Export past (~/) | `head ~/ past1, past2.` | Yes — identical | — |
+| Export past (</) | `head </ past1, past2.` | Yes — identical | — |
+| Export past (?/) | `head ?/ past1, past2.` | Yes — identical | — |
+| Past lifetime | `past_event(ev, 60).` | Yes — identical | — |
+| Remember | `remember_event(ev, 3600).` | Yes — identical | — |
+| Ontology | `meta/3` + OWL files | Yes — `meta/3` accepted as no-op | Also `ontology(same_as(a,b)).` inline |
+| assert/retract on facts | `assert(Fact)` / `retract(Fact)` | Yes — routes to per-agent belief store | — |
+| Arbitrary Prolog clauses | `head :- body.` | Yes — stored as per-agent KB | — |
+
+### DALI2 new features (not in DALI, all optional)
+
+| Feature | Syntax |
+|---------|--------|
+| Edge-triggered condition-action | `cond ?> action.` |
+| Periodic tasks | `every(seconds, goal).` |
+| Condition monitors | `when(condition) :- body.` |
+| Helpers | `helper(head) :- body.` |
+| Action proposal handlers | `on_proposal(action) :- body.` |
+| Learning rules | `learn_from(event, outcome) :- body.` |
+| AI Oracle | `ask_ai(context, result)` |
+| Blackboard (Redis) | `bb_read`/`bb_write`/`bb_remove` |
 
 ## Migrating from DALI to DALI2
 
