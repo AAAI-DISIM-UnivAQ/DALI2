@@ -381,6 +381,7 @@ The web interface at `http://localhost:8080` provides:
 | FIPA messages | `messageA(to, confirm(fact, Me))` | Same — 4 with special semantics, rest as handlers. DALI-original arity (e.g. `propose(Action, Content, Me)`, `query_ref(Query, Name, Me)`) |
 | Action definition | `actionA(X) :- body.` | `actionA(X) :- body.` (identical!) |
 | Action preconditions | `actionA :< precondition.` (never checked — DALI bug) | `actionA :< precondition.` (enforced — DALI2 fix) |
+| Event preconditions | `eve_cond/1` + `cd/1` | `eventE :< precondition.` (also accepts `cd/1` for compat) |
 | Condition-action (edge) | — | `cond ?> action.` (DALI2 extension) |
 | Action proposal | `propose(A,C,Ag)` + `call_propose` | `on_proposal(action) :- body.` |
 | Past lifetime | `past_event(ev, 60).` | `past_event(ev, 60).` (identical!) |
@@ -390,16 +391,69 @@ The web interface at `http://localhost:8080` provides:
 | Export past (?/) | `head ?/ past1, past2.` | `head ?/ past1, past2.` (identical!) |
 | Residue goals | `tenta_residuo(goal)` | `tenta_residuo(goal)` or `achieve(goal)` |
 | Present events | Atomic (`en/1`) | Atomic (use in body of `:>`, `?>`, `when`) |
-| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` (also accepts `deltat/1` for compat) |
 | Constraints | `:~ constraint.` | `:~ constraint.` (identical!) |
-| Ontologies | `meta/3` + OWL files | `ontology(same_as(a,b)).` + `ontology_file` |
+| Ontologies | `meta/3` + OWL files | `ontology(same_as(a,b)).` + `ontology_file` (`meta/3` accepted as no-op) |
 | Learning | `learning.pl` + constraints | `learn_from(event, outcome) :- body.` |
+| Message forms | `messageA/2,3`, `message/2`, `message/7` | All accepted — auto-converted to `send/2` |
 | Goals | `obt_goal(goal) :- plan.` | `obt_goal(goal) :- plan.` (identical!) |
 | Periodic tasks | — | `every(seconds, goal).` |
 | Condition monitors | — | `when(condition) :- body.` |
 | Helpers | — | `helper(head) :- body.` |
 | AI Oracle | — | `ask_ai(context, result)` |
 | Blackboard | Linda (TCP) | `bb_read`/`bb_write`/`bb_remove` (Redis) |
+
+## Migrating from DALI to DALI2
+
+DALI2 is designed to be **highly retrocompatible** with DALI. In most cases, you can take existing DALI code, paste it into a DALI2 `.pl` file, add `:- agent(name).` at the top, and it will work — no other syntax changes required.
+
+### The only required change
+
+| What | Why |
+|------|-----|
+| Add `:- agent(name).` before each agent's rules | DALI2 supports multiple agents in a single file; the directive tells the loader which agent owns the subsequent rules |
+
+That's it. All DALI operators (`:>`, `:<`, `~/`, `</`, `?/`, `:~`), suffixes (`E`, `I`, `A`, `N`, `P`, `R`, `G`, `T`), and rule forms work identically.
+
+### DALI constructs accepted as-is
+
+These DALI-specific constructs are recognized directly by DALI2 — no rewriting needed:
+
+| DALI construct | DALI2 behavior |
+|----------------|----------------|
+| `deltat(60).` | Works as global simultaneity interval for multi-events without inline `within/1` |
+| `cd(event) :- body.` | Works as external-event precondition (DALI `eve_cond` semantics) |
+| `eventE :< precondition.` | Works — routes to event precondition gate |
+| `messageA(To, send_message(C, Me), ReplyTo)` | Works — 3-arg form with explicit reply-to |
+| `message(To, performative(Content, Me))` | Works — direct DALI message form |
+| `message(IndTo, To, IndS, S, Lang, O, M)` | Works — DALI 7-arg internal transport format |
+| `meta/3`, `ontology/3` | Accepted silently (DALI2 uses inline `ontology/1` instead) |
+
+### DALI2 additional syntax (not in DALI)
+
+These are **new features** that don't exist in DALI. They are optional — DALI code doesn't use them, and DALI2 code doesn't require them.
+
+| Feature | Syntax | Notes |
+|---------|--------|-------|
+| Edge-triggered condition-action | `cond ?> action.` | Fires once on false→true transition |
+| Inline multi-event interval | `within(N)` in event list | More precise than global `deltat/1` — per-rule instead of per-agent |
+| Internal event configuration | `internal_event/5` | Optional — defaults match DALI if omitted |
+| Periodic tasks | `every(seconds, goal).` | |
+| Condition monitors | `when(condition) :- body.` | |
+| Helpers | `helper(head) :- body.` | |
+| Action proposal handlers | `on_proposal(action) :- body.` | DALI2 exposes this as user syntax |
+| Inline ontology | `ontology(same_as(a,b)).` | Replaces external OWL/SPARQL |
+| Learning rules | `learn_from(event, outcome) :- body.` | |
+| AI Oracle | `ask_ai(context, result)` | |
+| Blackboard | `bb_read`/`bb_write`/`bb_remove` | Replaces Linda tuple space |
+
+### Behavioral difference (one)
+
+| Behavior | DALI | DALI2 | Why |
+|----------|------|-------|-----|
+| Action preconditions (`:<`) | Never checked (DALI bug — key mismatch in `term_expansion`) | Enforced correctly | DALI2 fixes the bug; agents relying on preconditions being ignored may behave differently |
+
+Everything else — event preconditions, multi-events, constraints, goals, tell/told, FIPA messages, export past rules, past lifetime, remember — behaves the same.
 
 ## License
 

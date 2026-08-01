@@ -349,10 +349,13 @@ Fire when **all** listed events have occurred in the agent's past memory. The bo
 
 ```prolog
 event1E(Args), event2E(Args) :> Body.                      %% no time constraint
-event1E(Args), event2E(Args), within(Seconds) :> Body.     %% with delta-t
+event1E(Args), event2E(Args), within(Seconds) :> Body.     %% with delta-t (DALI2 preferred)
+deltat(Seconds).                                           %% global delta-t (DALI compat)
 ```
 
-The optional `within(Seconds)` specifies a **delta-t** (simultaneity interval): all events must have occurred within the given time window. This mirrors DALI's original `deltat/1` mechanism. Without `within`, events are matched regardless of when they occurred.
+The optional `within(Seconds)` specifies a **delta-t** (simultaneity interval): all events must have occurred within the given time window. Without `within`, events are matched regardless of when they occurred.
+
+> **DALI compatibility:** The directive `deltat(N).` (or `deltaT(N).`) sets a **global** simultaneity interval that applies to all multi-event rules that don't have an inline `within/1`. This mirrors DALI's original `deltat/1` mechanism. Inline `within/1` takes priority over the global `deltat/1`.
 
 **Examples:**
 
@@ -540,6 +543,12 @@ DALI2 supports FIPA-ACL message types for structured inter-agent communication, 
 | `reply(Content)` | `messageA(To, reply(Content, Me))` | Normal handler (DALI has receive only) |
 
 > **Shorthand:** `send(To, Content)` is also accepted as equivalent to `messageA(To, send_message(Content, Me))`.
+>
+> **DALI compatibility forms:** The following DALI message syntaxes are also accepted and auto-converted to `send/2`:
+> - `messageA(To, send_message(Content, Me), ReplyTo)` — 3-arg form with explicit reply-to
+> - `message(To, performative(Content, Me))` — direct DALI message form (FIPA performatives stripped of sender)
+> - `message(To, send_message(Content, Me))` — direct DALI message form
+> - `message(IndTo, To, IndS, S, Lang, O, M)` — DALI 7-arg internal transport format → `send(To, M)`
 
 **Special semantics:**
 
@@ -871,6 +880,23 @@ actionA(Args) :- Body.
 
 When `do(action(Args))` is called, DALI2 first checks the precondition clause. If the precondition fails, the action is not executed and a log entry is recorded. If no precondition clause exists, the action body runs unconditionally.
 
+**External-event preconditions (`:<` on E-suffix, `cd/1`):**
+
+The `:<` operator also works on external events (E suffix) to define preconditions that gate whether an event's handlers fire. This mirrors DALI's `eve_cond/1` mechanism.
+
+```prolog
+eventE(Args) :< Precondition.    %% handlers fire only if Precondition holds
+eventE(Args) :> Body.            %% handler definition
+```
+
+Alternatively, DALI's `cd/1` syntax is accepted:
+
+```prolog
+cd(event) :- Precondition.        %% equivalent to eventE :< Precondition.
+```
+
+When an external event arrives, DALI2 checks if a precondition is registered for that event. If it exists and fails, the event is refused (handlers do not fire). If no precondition exists, the event is accepted unconditionally.
+
 > **DALI compatibility note:** In the original DALI (SICStus), `:<` preconditions are **never actually checked** at runtime due to a key-mismatch bug: the `term_expansion` directive stores the precondition as `cd(a(Action))` (with the `a/1` wrapper), but the auto-generated action clause checks `cd(Action)` (without the wrapper), which always succeeds via a default `cd(Action) :- true.` clause. As a result, DALI always executes the action body regardless of the precondition. DALI2 fixes this by correctly checking the precondition before executing the action body. Agents ported from DALI that relied on the precondition being ignored (i.e., the action always running) may behave differently in DALI2 if the precondition actually fails.
 
 **Examples:**
@@ -1099,7 +1125,8 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Remember event | `rem/1` | `eventR` → `has_remember(event)` (body only) |
 | Obtain goal | `obg/1` (postfix G) | `goalG` → `obt_goal(goal)` (or `obt_goal/1` directly) |
 | Test goal | `tesg/1` (postfix T) | `goalT` → `test_goal(goal)` (or `test_goal/1` directly) |
-| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` |
+| Multi-events | `ev1E, ev2E :> body.` + `deltat/1` | `ev1E, ev2E, within(N) :> body.` (`deltat/1` also accepted) |
+| Event preconditions | `cd(event) :- body.` / `eve_cond/1` | `eventE :< body.` (`cd/1` also accepted) |
 | Constraint | `:~ constraint.` | `:~ constraint.` (identical) |
 | Export past (~/) | `head ~/ past1, past2.` | `head ~/ past1, past2.` (identical) |
 | Export past (</) | `head </ past1, past2.` | `head </ past1, past2.` (identical) |
@@ -1117,7 +1144,8 @@ DALI2 uses the **same syntax** as the original DALI. No agent prefix is needed �
 | Past check | `evp(event)` / `eventP(args)` | Same, or `has_past(event)` |
 | Residue goal | `tenta_residuo(goal)` | Same, or `achieve(goal)` |
 | Belief check | `clause(isa(fact,_,_),_)` | Same, or `believes(fact)` |
-| Ontology | `meta/3` + OWL | `ontology(same_as(a,b)).` |
+| Ontology | `meta/3` + OWL | `ontology(same_as(a,b)).` (`meta/3` accepted as no-op) |
+| Message forms | `messageA/2,3`, `message/2`, `message/7` | All accepted — auto-converted to `send/2` |
 | Learning | — | `learn_from(event, outcome) :- cond.` |
 | Periodic | — | `every(seconds, goal).` |
 | Condition monitor | — | `when(condition) :- body.` |

@@ -2,17 +2,21 @@
 %% Demonstrates DALI-original rule types and DSL predicates in a single file,
 %% using only standard DALI syntax (operators :>, :<, ~/, </, ?/, :~ and
 %% suffixes E, I, A, N, P) and FIPA communication (messageA/send_message).
+%% Also demonstrates DALI retrocompatibility features: deltat/1, cd/1,
+%% :< on E-suffix events, and DALI message forms (message/2, messageA/3).
 %% No DALI2-only extensions (every, when, helper, learn_from, ontology,
 %% on_proposal, bb_read/bb_write/bb_remove, ?>, internal_event/5).
 %% ask_ai is kept (graceful fallback when not configured).
 %%
 %% Agents:
 %%   - thermostat:   internal events (default fire-once), constraints
-%%   - sensor:       past lifetime/remember, goals
+%%   - sensor:       past lifetime/remember, goals, event preconditions (cd/1)
 %%   - coordinator:  reactive rules, tell/told (priority queue), FIPA messages,
-%%                   multi-events, goals, residue goals, export past rules
+%%                   multi-events (deltat/1 + within/1), goals, residue goals,
+%%                   export past rules, DALI message forms
 %%   - logger:       semantic logging
-%%   - worker:       FIPA responses, actions (A suffix), export past rules
+%%   - worker:       FIPA responses, actions (A suffix), export past rules,
+%%                   event preconditions (:< on E-suffix)
 %%
 %% Run:   AGENT_FILE=examples/showcase_original_features.pl docker compose up --build
 %% Or:    swipl -l src/server.pl -g main -- 8080 examples/showcase_original_features.pl
@@ -92,6 +96,16 @@ read_tempE(T) :>
     log("Sensor read: ~w", [T]),
     messageA(coordinator, send_message(sensor_data(T), Me)).
 
+%% DALI retrocompatibility: cd/1 event precondition (DALI eve_cond style)
+%% Equivalent to: critical_tempE :< believes(threshold_reached).
+cd(critical_temp) :- believes(threshold_reached).
+
+%% External event with precondition (DALI cd/1 gate)
+%% Handlers fire only if cd(critical_temp) holds
+critical_tempE(T) :>
+    log("CRITICAL: temperature ~w exceeds threshold!", [T]),
+    messageA(coordinator, send_message(alert(critical, T), Me)).
+
 %% Obtain goal (DALI obt_goal syntax)
 obt_goal(believes(calibrated(true))) :-
     log("Attempting calibration..."),
@@ -144,16 +158,28 @@ tell(_, _, analyze(_)) :- true.
 
 %% Multi-event: fire when both sensor data AND an alert
 %% have been received within 10 seconds of each other.
+%% Uses inline within/1 (DALI2 preferred form).
 sensor_dataE(_), alertE(_, _), within(10) :>
     log("MULTI-EVENT: Both sensor data and alert received within 10s!"),
     messageA(logger, send_message(log_event(combined_alert, coordinator, multi_trigger), Me)).
 
-%% External event handlers (DALI :> syntax with E suffix)
+%% DALI retrocompatibility: deltat/1 global simultaneity interval
+%% Multi-events without inline within/1 will use this global interval.
+deltat(30).
+
+%% Multi-event using global deltat (no inline within/1)
+%% Fires when both events occurred within 30 seconds (from deltat/1 above).
+loginE(User), authorizeE(User) :>
+    log("MULTI-EVENT (deltat): User ~w fully authenticated", [User]).
+
+%% DALI retrocompatibility: direct message/2 form (auto-converted to send/2)
+%% This is equivalent to messageA(logger, send_message(direct_msg(T), Me)).
 sensor_dataE(T) :>
     log("Coordinator received sensor data: ~w", [T]),
     ( T > 40 ->
         messageA(logger, send_message(log_event(high_temp, coordinator, T), Me))
-    ; true ).
+    ; true ),
+    message(logger, inform(direct_msg(T), coordinator)).
 
 alertE(Type, Value) :>
     log("Coordinator alert: ~w = ~w", [Type, Value]),
@@ -272,6 +298,17 @@ analyzeA(Data) :-
     log("Executing analysis: ~w", [Data]),
     assert_belief(analysis_complete(Data)),
     messageA(coordinator, inform(analysis_result(Data), complete, Me)).
+
+%% DALI retrocompatibility: :< on E-suffix (external-event precondition)
+%% Handlers for sensitiveE fire only if the precondition holds.
+sensitiveE(Data) :< believes(security_clearance).
+sensitiveE(Data) :>
+    log("Sensitive data received: ~w (precondition verified)", [Data]).
+
+%% DALI retrocompatibility: messageA/3 with explicit ReplyTo
+%% Equivalent to messageA(coordinator, send_message(report(Data), Me)).
+report_doneE(Data) :>
+    messageA(coordinator, send_message(report(Data), worker), worker).
 
 %% External event handler
 confirmE(Fact) :>

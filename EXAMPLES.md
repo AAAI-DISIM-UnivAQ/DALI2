@@ -303,15 +303,22 @@ curl.exe http://localhost:8080/api/past?agent=coordinator
 
 A comprehensive showcase using **only standard DALI syntax** — the same operators (`:>`, `:<`, `~/`, `</`, `?/`, `:~`), suffixes (`E`, `I`, `A`, `N`, `P`), and FIPA-style communication that work in the original DALI framework. FIPA performatives use the direct form `messageA(Dest, performative(Content..., Me))` with DALI-original arity (e.g. `messageA(worker, propose(analyze(Data), [], Me))`, `messageA(worker, query_ref(status(_), _, Me))`). Internal events use the default fire-once behavior (no `internal_event/5` declarations). No DALI2-only extensions (`?>`, `every`, `when`, `helper`, `learn_from`, `ontology`, `on_proposal`, `bb_write`/`bb_read`/`bb_remove`). This is the recommended starting point for students learning DALI semantics.
 
+**DALI retrocompatibility features demonstrated:**
+- `cd/1` event precondition (DALI `eve_cond` style) — sensor agent
+- `:<` on E-suffix external events — worker agent
+- `deltat/1` global simultaneity directive — coordinator agent
+- Direct `message/2` form (auto-converted to `send/2`) — coordinator agent
+- `messageA/3` with explicit ReplyTo — worker agent
+
 ### Agents
 
 | Agent | Role | Features Demonstrated |
 |-------|------|----------------------|
 | `thermostat` | Temperature control | Internal events (default fire-once), constraints |
-| `sensor` | Sensor readings | Past lifetime/remember, goals |
-| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events, goals, residue goals, export past rules, proposal sending, AI oracle |
+| `sensor` | Sensor readings | Past lifetime/remember, goals, event preconditions (`cd/1`) |
+| `coordinator` | Central coordination | Tell/told (priority queue + body conditions), FIPA messages, multi-events (`within/1` + `deltat/1`), goals, residue goals, export past rules, DALI message forms (`message/2`) |
 | `logger` | Semantic logging | Reactive rules, belief tracking |
-| `worker` | Task execution | FIPA proposal handling (`proposeE`), actions (`A` suffix), preconditions (`:<`), export past rules, told rules (body conditions) |
+| `worker` | Task execution | FIPA proposal handling (`proposeE`), actions (`A` suffix), preconditions (`:<`), event preconditions (`:<` on E-suffix), `messageA/3` with ReplyTo, export past rules, told rules (body conditions) |
 
 ### Features Demonstrated
 
@@ -322,6 +329,11 @@ A comprehensive showcase using **only standard DALI syntax** — the same operat
 - **Tell/told filtering** with priority queue — coordinator, worker
 - **FIPA messages** — confirm, inform, query_ref, propose, accept/reject_proposal
 - **Multi-events** (`E` suffix conjunction + `within/1`) — coordinator
+- **Multi-events with `deltat/1`** (DALI compat) — coordinator
+- **Event preconditions** (`cd/1`) — sensor (DALI compat)
+- **Event preconditions** (`:<` on E-suffix) — worker (DALI compat)
+- **DALI message forms** (`message/2`) — coordinator (DALI compat)
+- **`messageA/3` with ReplyTo** — worker (DALI compat)
 - **Export past rules** (`~/`, `</`) — coordinator, worker
 - **Residue goals** (`tenta_residuo`/`evp`) — coordinator
 - **Past lifetime + remember tier** — sensor

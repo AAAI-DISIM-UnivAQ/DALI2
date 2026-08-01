@@ -109,6 +109,8 @@
 :- dynamic agent_tell/3.        % agent_tell(Agent, Pattern, Body)
 :- dynamic agent_condition_action/3.
 :- dynamic agent_action_precond/3. % agent_action_precond(Agent, ActionKey, Precondition)
+:- dynamic agent_event_precond/3.  % agent_event_precond(Agent, EventBase, Precondition) — DALI eve_cond/cd
+:- dynamic agent_deltat/2.         % agent_deltat(Agent, Seconds) — DALI global simultaneity interval
 :- dynamic agent_clause/3.         % agent_clause(Agent, Head, Body) — per-agent Prolog KB
 :- dynamic agent_present/3.
 :- dynamic agent_multi_event/4. % agent_multi_event(Agent, EventList, Body, DeltaT)
@@ -144,6 +146,8 @@ clear_definitions :-
     retractall(agent_tell(_, _, _)),
     retractall(agent_condition_action(_, _, _)),
     retractall(agent_action_precond(_, _, _)),
+    retractall(agent_event_precond(_, _, _)),
+    retractall(agent_deltat(_, _)),
     retractall(agent_clause(_, _, _)),
     retractall(agent_present(_, _, _)),
     retractall(agent_multi_event(_, _, _, _)),
@@ -250,6 +254,10 @@ transform_body(not(A), not(TA)) :- !,
     transform_body(A, TA).
 transform_body(messageA(Dest, send_message(Content, _Me)), send(Dest, Content)) :- !.
 transform_body(messageA(Dest, send_message(Content)), send(Dest, Content)) :- !.
+%% 3-arg messageA with send_message payload (explicit ReplyTo/sender), e.g.
+%%   messageA(agent1, send_message(alarm1, agent3), agent3) → send(agent1, alarm1)
+transform_body(messageA(Dest, send_message(Content, _Me), _ReplyTo), send(Dest, Content)) :- !.
+transform_body(messageA(Dest, send_message(Content), _ReplyTo), send(Dest, Content)) :- !.
 %% DALI original FIPA primitives (form B) — sender (Me) is the last arg
 %% inside the performative. Stripped during transformation.
 %%   messageA(To, inform(Content, Me))             → send(To, inform(Content))
@@ -270,6 +278,13 @@ transform_body(messageA(Dest, Perf, _ReplyTo), send(Dest, Stripped)) :-
     Perf =.. [FName | Args],
     append(Keep, [_Sender], Args),
     Stripped =.. [FName | Keep].
+%% DALI direct action form: a(message(To, Perf)) and bare message(To, Perf).
+%%   a(message(ag, send_message(C, Me)))     → send(ag, C)
+%%   a(message(ag, inform(C, Me)))           → send(ag, inform(C))
+transform_body(a(Msg), Send) :- nonvar(Msg), functor(Msg, message, _), !,
+    transform_message_send(Msg, Send).
+transform_body(Msg, Send) :- nonvar(Msg), functor(Msg, message, N), N >= 2, !,
+    transform_message_send(Msg, Send).
 transform_body(evp(Event), has_past(Event)) :- !.
 transform_body(clause(past(Event,_,_),_), has_past(Event)) :- !.
 transform_body(clause(isa(Fact,_,_),_), believes(Fact)) :- !.
@@ -303,6 +318,24 @@ transform_body(Term, test_goal_check(BaseTerm)) :-
     nonvar(Term),
     strip_suffix_term(Term, BaseTerm, 'T'), !.
 transform_body(Term, Term).
+
+%% transform_message_send(+MessageTerm, -Send)
+%% Maps DALI message/N send forms to DALI2 send/2.
+%%   message(To, send_message(C, Me))  → send(To, C)
+%%   message(To, send_message(C))      → send(To, C)
+%%   message(To, Perf)  (FIPA)         → send(To, PerfWithoutSender)
+%%   message(To, Perf)  (other)        → send(To, Perf)
+%%   message(IndTo,To,IndS,S,Lang,O,M) → send(To, M)   (7-arg internal transport)
+transform_message_send(message(To, send_message(C, _Me)), send(To, C)) :- !.
+transform_message_send(message(To, send_message(C)), send(To, C)) :- !.
+transform_message_send(message(To, Perf), send(To, Stripped)) :-
+    nonvar(Perf), functor(Perf, FName, Arity), Arity >= 2,
+    fipa_performative(FName), !,
+    Perf =.. [FName | Args],
+    append(Keep, [_Sender], Args),
+    Stripped =.. [FName | Keep].
+transform_message_send(message(To, Perf), send(To, Perf)) :- !.
+transform_message_send(message(_IndTo, To, _IndS, _S, _Lang, _O, M), send(To, M)) :- !.
 
 %% fipa_performative(?Name) — list of FIPA-ACL performatives supported in
 %% the "original DALI" form B syntax: messageA(To, perform(Content..., Me))
@@ -431,13 +464,51 @@ process_term(?>(Cond, Action)) :- !,
 %% ============================================================
 
 process_term(:<(Name:Head, Pre)) :- !,
-    precond_key(Head, Key),
     transform_body(Pre, TP),
-    assert(agent_action_precond(Name, Key, TP)).
+    store_precond(Name, Head, TP).
 process_term(:<(Head, Pre)) :- !,
-    precond_key(Head, Key),
     transform_body(Pre, TP),
-    (ctx(Ag) -> assert(agent_action_precond(Ag, Key, TP)) ; true).
+    (ctx(Ag) -> store_precond(Ag, Head, TP) ; true).
+
+%% store_precond(+Agent, +Head, +Precond)
+%% DALI's `:<` expands to cd(Head), and cd/1 is the SHARED precondition used for
+%% BOTH actions (a(X):-cd(X)) and external events (eve_cond(X):-cd(X),eve(X)).
+%% We route by the DALI suffix of Head:
+%%   someEventE :< Pre  → external-event precondition (eve_cond)
+%%   someActionA :< Pre → action precondition (default; suffix stripped)
+store_precond(Agent, Head, TP) :-
+    ( strip_suffix_term(Head, Base, 'E') ->
+        assert(agent_event_precond(Agent, Base, TP))
+    ;
+        precond_key(Head, Key),
+        assert(agent_action_precond(Agent, Key, TP))
+    ).
+
+%% ============================================================
+%% cd/1 — DALI condition-definition (external-event precondition)
+%% In DALI, eve_cond(X):-cd(X),eve(X). A user-written `cd(Ev) :- Body` (or bare
+%% `cd(Ev)`) therefore declares the precondition that gates external event Ev.
+%% ============================================================
+process_term((Name:cd(X) :- Body)) :- !,
+    transform_body(Body, TB), assert(agent_event_precond(Name, X, TB)).
+process_term((cd(X) :- Body)) :- !,
+    transform_body(Body, TB),
+    (ctx(Ag) -> assert(agent_event_precond(Ag, X, TB)) ; true).
+process_term(Name:cd(X)) :- !, assert(agent_event_precond(Name, X, true)).
+process_term(cd(X)) :- !,
+    (ctx(Ag) -> assert(agent_event_precond(Ag, X, true)) ; true).
+
+%% ============================================================
+%% deltat/1 — DALI global simultaneity interval for multi-events.
+%%   deltat(60).   applies to every multi-event rule that has no inline within/1.
+%% Accepts the capitalized `deltaT` spelling as an alias.
+%% ============================================================
+process_term(Name:deltat(N)) :- number(N), !, assert(agent_deltat(Name, N)).
+process_term(deltat(N)) :- number(N), !,
+    (ctx(Ag) -> assert(agent_deltat(Ag, N)) ; true).
+process_term(Name:deltaT(N)) :- number(N), !, assert(agent_deltat(Name, N)).
+process_term(deltaT(N)) :- number(N), !,
+    (ctx(Ag) -> assert(agent_deltat(Ag, N)) ; true).
 
 %% ============================================================
 %% ~/ OPERATOR  (export past)
@@ -624,6 +695,15 @@ process_term((learn_from(E, O) :- B)) :- !,
 process_term(learn_from(E, O)) :- !,
     (ctx(Ag) -> assert(agent_learn_rule(Ag, E, O, true)) ; true).
 
+%% DALI learning compatibility stubs — recognized so DALI code loads cleanly.
+%% These are no-ops in DALI2 (which uses learn_from/2 pattern association).
+process_term((learn_if(_, _, _) :- _)) :- !, true.
+process_term(learn_if(_, _, _)) :- !, true.
+process_term((modified_clause(_, _) :- _)) :- !, true.
+process_term(modified_clause(_, _)) :- !, true.
+process_term((txt_clause(_, _) :- _)) :- !, true.
+process_term(txt_clause(_, _)) :- !, true.
+
 %% ontology / ontology_file
 process_term(Name:ontology(D)) :- !, assert(agent_ontology(Name, D)).
 process_term(ontology(D)) :- !,
@@ -631,6 +711,13 @@ process_term(ontology(D)) :- !,
 process_term(Name:ontology_file(F)) :- !, assert(agent_ontology_file(Name, F)).
 process_term(ontology_file(F)) :- !,
     (ctx(Ag) -> assert(agent_ontology_file(Ag, F)) ; true).
+
+%% DALI ontology/3 and meta/3 compatibility stubs — DALI uses external OWL
+%% repositories via ontology(Prefixes,[Repo,Host],Agent) and meta(Event,Goal,Agent).
+%% These are no-ops in DALI2 (which uses inline ontology/1).
+process_term(ontology(_, _, _)) :- !, true.
+process_term((meta(_, _, _) :- _)) :- !, true.
+process_term(meta(_, _, _)) :- !, true.
 
 %% ============================================================
 %% PREFIX-LESS Action (A suffix)
@@ -713,7 +800,8 @@ process_term(Fact) :-
     \+ member(F, [told, tell, past_event, remember_event, remember_event_mod,
                   internal_event, obt_goal, test_goal, believes,
                   every, when, helper, on_proposal, learn_from,
-                  ontology, ontology_file]), !,
+                  ontology, ontology_file, cd, deltat, deltaT,
+                  meta, learn_if, modified_clause, txt_clause]), !,
     (ctx(Ag) -> assert(agent_belief(Ag, Fact)) ; true).
 
 process_term(Term) :-

@@ -287,8 +287,24 @@ fire_proposal_handlers_local(Name, From, Action) :-
 %% ============================================================
 
 fire_handlers_local(Name, Event) :-
-    findall(Pattern-Body, loader:agent_handler(Name, Pattern, Body), Handlers),
-    fire_handler_list_local(Name, Event, Handlers).
+    (event_precondition_holds_local(Name, Event) ->
+        findall(Pattern-Body, loader:agent_handler(Name, Pattern, Body), Handlers),
+        fire_handler_list_local(Name, Event, Handlers)
+    ;
+        log_local(Name, "External event preconditions not verified, refused: ~w", [Event])
+    ).
+
+%% event_precondition_holds_local(+Name, +Event) — DALI eve_cond semantics.
+%% True if the event has no declared precondition (eventE :< Pre / cd(event)),
+%% or at least one matching precondition holds. When a precondition exists but
+%% fails, the external event is refused (handlers do not fire).
+event_precondition_holds_local(Name, Event) :-
+    (loader:agent_event_precond(Name, Pat, _), \+ \+ Pat = Event ->
+        ( loader:agent_event_precond(Name, P, Pre),
+          copy_term(P-Pre, Event-PreC),
+          catch(call_condition_local(PreC), _, fail) )
+    ;   true
+    ).
 
 fire_handler_list_local(_, _, []).
 fire_handler_list_local(Name, Event, [Pattern-Body | Rest]) :-
@@ -476,8 +492,9 @@ process_present_events_local(Name) :-
         catch(execute_body_local(Name, Body), _, true)).
 
 process_multi_events_local(Name) :-
-    forall(loader:agent_multi_event(Name, EventList, Body, DeltaT),
-        (term_to_atom(EventList, MultiId),
+    forall(loader:agent_multi_event(Name, EventList, Body, DeltaT0),
+        (effective_deltat_local(Name, DeltaT0, DeltaT),
+         term_to_atom(EventList, MultiId),
          (all_events_occurred_local(EventList, DeltaT) ->
             (agent_multi_fired(MultiId) -> true ;
                 assert(agent_multi_fired(MultiId)),
@@ -485,6 +502,12 @@ process_multi_events_local(Name) :-
          ;
             retractall(agent_multi_fired(MultiId))
          ))).
+
+%% effective_deltat_local(+Name, +InlineDeltaT, -DeltaT)
+%% Inline within/1 wins; otherwise use the agent-global deltat/1 directive; else 0.
+effective_deltat_local(_, D, D) :- number(D), D > 0, !.
+effective_deltat_local(Name, _, D) :- loader:agent_deltat(Name, D), number(D), D > 0, !.
+effective_deltat_local(_, _, 0).
 
 %% all_events_occurred_local(+EventList, +DeltaT)
 %% DeltaT = 0 means no time constraint.
